@@ -24,6 +24,7 @@ import Asterius.Resolve
 import Asterius.Types
 import qualified Asterius.Types.SymbolSet as SS
 import Control.Exception
+import Data.Either
 import Data.Traversable
 
 data LinkTask
@@ -47,15 +48,9 @@ data LinkTask
 loadTheWorld :: LinkTask -> IO AsteriusCachedModule
 loadTheWorld LinkTask {..} = do
   ncu <- newNameCacheUpdater
-  lib <- do
-    entries <- concat <$> for linkLibs loadArchiveEntries
-    parallelFoldMap threadPoolSize entries (loadArchiveEntry ncu)
-  objs <- parallelFoldMap threadPoolSize linkObjs (loadObj ncu)
-  evaluate $ linkModule <> objs <> lib
-  where
-    loadObj ncu path = tryGetFile ncu path >>= \case
-      Left {} -> pure mempty
-      Right m -> pure m
+  lib <- mconcat <$> for linkLibs (loadAr ncu)
+  objs <- rights <$> for linkObjs (tryGetFile ncu)
+  evaluate $ linkModule <> mconcat objs <> lib
 
 -- | The *_info are generated from Cmm using the INFO_TABLE macro.
 -- For example, see StgMiscClosures.cmm / Exception.cmm
