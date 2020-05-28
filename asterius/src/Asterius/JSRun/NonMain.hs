@@ -33,7 +33,7 @@ linkNonMain store_m extra_syms = (m, link_report)
             linkOutput = "",
             linkObjs = [],
             linkLibs = [],
-            linkModule = mempty,
+            linkModule = store_m,
             Asterius.Ld.hasMain = False,
             Asterius.Ld.debug = False,
             Asterius.Ld.gcSections = True,
@@ -42,7 +42,8 @@ linkNonMain store_m extra_syms = (m, link_report)
             rootSymbols = extra_syms,
             Asterius.Ld.exportFunctions = []
           }
-        store_m
+        mempty
+        mempty
 
 distNonMain ::
   FilePath -> [EntitySymbol] -> (Module, LinkReport) -> IO ()

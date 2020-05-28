@@ -42,12 +42,12 @@ data LinkTask
 -- deserialization failures. Hence, when we deserialize objects to be linked in
 -- 'loadTheWorld', we choose to be overpermissive and silently ignore
 -- deserialization failures. This has worked well so far.
-loadTheWorld :: LinkTask -> IO AsteriusCachedModule
+loadTheWorld :: LinkTask -> IO (AsteriusCachedModule, AsteriusCachedModule)
 loadTheWorld LinkTask {..} = do
   ncu <- newNameCacheUpdater
   lib <- mconcat <$> for linkLibs (loadAr ncu)
   objs <- rights <$> for linkObjs (tryGetFile ncu)
-  evaluate $ linkModule <> mconcat objs <> lib
+  return (mconcat objs, lib)
 
 -- | The *_info are generated from Cmm using the INFO_TABLE macro.
 -- For example, see StgMiscClosures.cmm / Exception.cmm
@@ -89,22 +89,25 @@ rtsPrivateSymbols =
     ]
 
 linkModules ::
-  LinkTask -> AsteriusCachedModule -> (AsteriusModule, Module, LinkReport)
-linkModules LinkTask {..} m =
+  LinkTask ->
+  AsteriusCachedModule ->
+  AsteriusCachedModule ->
+  (AsteriusModule, Module, LinkReport)
+linkModules LinkTask {..} objects_m archives_m =
   linkStart
     debug
     gcSections
     verboseErr
-    ( toCachedModule
-        ( (if hasMain then mainBuiltins else mempty)
-            <> rtsAsteriusModule
-              defaultBuiltinsOptions
-                { Asterius.Builtins.progName = progName,
-                  Asterius.Builtins.debug = debug
-                }
-        )
-        <> m
+    ( (if hasMain then mainBuiltins else mempty)
+        <> rtsAsteriusModule
+          defaultBuiltinsOptions
+            { Asterius.Builtins.progName = progName,
+              Asterius.Builtins.debug = debug
+            }
     )
+    linkModule
+    objects_m
+    archives_m
     ( SS.unions
         [ SS.fromList rootSymbols,
           rtsUsedSymbols,
@@ -119,8 +122,8 @@ linkModules LinkTask {..} m =
 
 linkExeInMemory :: LinkTask -> IO (AsteriusModule, Module, LinkReport)
 linkExeInMemory ld_task = do
-  final_store <- loadTheWorld ld_task
-  evaluate $ linkModules ld_task final_store
+  (objects_m, archives_m) <- loadTheWorld ld_task
+  evaluate $ linkModules ld_task objects_m archives_m
 
 linkExe :: LinkTask -> IO ()
 linkExe ld_task@LinkTask {..} = do
