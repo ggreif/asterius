@@ -54,6 +54,7 @@ where
 import Asterius.Binary.Orphans ()
 import Asterius.Binary.TH
 import Asterius.NFData.TH
+import qualified Asterius.Types.DependencyMap as DM ()
 import Asterius.Types.EntitySymbol
 import Asterius.Types.SymbolMap (SymbolMap)
 import qualified Asterius.Types.SymbolMap as SM
