@@ -54,7 +54,7 @@ where
 import Asterius.Binary.Orphans ()
 import Asterius.Binary.TH
 import Asterius.NFData.TH
-import qualified Asterius.Types.DependencyMap as DM ()
+import qualified Asterius.Types.DependencyMap as DM
 import Asterius.Types.EntitySymbol
 import Asterius.Types.SymbolMap (SymbolMap)
 import qualified Asterius.Types.SymbolMap as SM
@@ -132,7 +132,7 @@ instance Monoid AsteriusModule where
 -- segments and function definitions (see function 'toCachedModule').
 data AsteriusCachedModule
   = AsteriusCachedModule
-      { dependencyMap :: SymbolMap SymbolSet,
+      { dependencyMap :: DM.DependencyMap,
         fromCachedModule :: AsteriusModule
       }
   deriving (Show, Data)
@@ -154,7 +154,9 @@ toCachedModule :: AsteriusModule -> AsteriusCachedModule
 toCachedModule m =
   AsteriusCachedModule
     { fromCachedModule = m,
-      dependencyMap = staticsMap m `add` (functionMap m `add` SM.empty)
+      dependencyMap =
+        DM.toDependencyMap $
+          staticsMap m `add` (functionMap m `add` SM.empty)
     }
   where
     add :: Data a => SymbolMap a -> SymbolMap SymbolSet -> SymbolMap SymbolSet
