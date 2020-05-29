@@ -128,27 +128,49 @@ instance Semigroup AsteriusModule where
 instance Monoid AsteriusModule where
   mempty = AsteriusModule mempty mempty mempty mempty mempty
 
+-- | Location of an 'EntitySymbol' on drive. To be able to retrieve the entity
+-- itself, depending on its origin, we have two cases:
+-- * For entities originating in object files it suffices to know (a) the name
+--   of the object file and (b) the absolute offset in the object file.
+-- * For entities originating in archive files, we need (a) the name of the
+--   archive file, (b) the name of the object file within the archive file, and
+--   (c) the relative offset in the object file.
+data EntityLocation
+  = -- | object file origin
+    InObjectFile
+      { srcObj :: FilePath,
+        srcOffset :: Integer
+      }
+    -- | archive file origin
+  | InArchiveFile
+      { srcAr :: FilePath,
+        srcObj :: FilePath,
+        srcOffset :: Integer
+      }
+  deriving (Show, Data)
+
 -- TODO: This should replace all uses of AsteriusCachedModule basically.
 data ModuleMetadata
   = ModuleMetadata
       { staticsDependencyMap :: DM.DependencyMap,
         functionDependencyMap :: DM.DependencyMap,
+        entitySymbolIndex :: SM.SymbolMap EntityLocation,
         -- TODO: for now we duplicate the whole FFIMarshalState but we will probably
         -- prefer to have an index here, if that is possible.
         metaFFIMarshalState :: FFIMarshalState
-        -- TODO: Add the index here!
       }
   deriving (Show, Data)
 
 instance Semigroup ModuleMetadata where
-  ModuleMetadata sdm0 fdm0 mod_ffi_state0 <> ModuleMetadata sdm1 fdm1 mod_ffi_state1 =
+  ModuleMetadata sdm0 fdm0 idx0 mod_ffi_state0 <> ModuleMetadata sdm1 fdm1 idx1 mod_ffi_state1 =
     ModuleMetadata
       (sdm0 <> sdm1)
       (fdm0 <> fdm1)
+      (idx0 <> idx1)
       (mod_ffi_state0 <> mod_ffi_state1)
 
 instance Monoid ModuleMetadata where
-  mempty = ModuleMetadata mempty mempty mempty
+  mempty = ModuleMetadata mempty mempty mempty mempty
 
 -- | An 'AsteriusCachedModule' in an 'AsteriusModule' along with  with all of
 -- its 'EntitySymbol' dependencies, as they are appear in the modules data
@@ -181,6 +203,7 @@ toCachedModule m =
         ModuleMetadata
           { staticsDependencyMap = DM.toDependencyMap $ staticsMap m `add` SM.empty,
             functionDependencyMap = DM.toDependencyMap $ functionMap m `add` SM.empty,
+            entitySymbolIndex = mempty, -- TODO (toCachedModule should go away anyway)
             metaFFIMarshalState = ffiMarshalState m -- TODO: hate to duplicate this.
           },
       fromCachedModule = m
@@ -653,6 +676,8 @@ $(genNFData ''AsteriusStatics)
 
 $(genNFData ''AsteriusModule)
 
+$(genNFData ''EntityLocation)
+
 $(genNFData ''ModuleMetadata)
 
 $(genNFData ''AsteriusCachedModule)
@@ -720,6 +745,8 @@ $(genBinary ''AsteriusStaticsType)
 $(genBinary ''AsteriusStatics)
 
 $(genBinary ''AsteriusModule)
+
+$(genBinary ''EntityLocation)
 
 $(genBinary ''ModuleMetadata)
 

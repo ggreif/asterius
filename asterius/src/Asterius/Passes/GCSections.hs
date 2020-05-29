@@ -55,7 +55,7 @@ gcSections verbose_err c_store_mod root_syms export_funcs =
       SS.fromList [ffiExportClosure | FFIExportDecl {..} <- SM.elems ffi_exports]
         <> root_syms
     -- outputs
-    final_m = buildGCModule
+    final_m = buildGCModule  -- TODO: eventually: buildGCModule verbose_err all_root_syms meta
                 verbose_err
                 all_root_syms
                 (staticsDependencyMap $ cachedMetadata c_store_mod)
