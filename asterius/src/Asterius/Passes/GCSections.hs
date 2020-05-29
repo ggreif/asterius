@@ -93,11 +93,12 @@ buildGCModule verbose_err root_syms statics_deps functions_deps statics_map func
         (i_child_syms, o_m) = SS.foldr' step (SS.empty, i_m) i_staging_syms
         o_staging_syms = i_child_syms `SS.difference` o_acc_syms
         step i_staging_sym (i_child_syms_acc, o_m_acc)
-          | Just ss <- SM.lookup i_staging_sym statics_map,
-            es <- statics_deps DM.! i_staging_sym = -- should always succeed
+          | Just es <- DM.lookup i_staging_sym statics_deps,
+            ss <- statics_map SM.! i_staging_sym = -- should always succeed
             (es <> i_child_syms_acc, extendStaticsMap o_m_acc i_staging_sym ss)
-          | Just func <- SM.lookup i_staging_sym function_map,
-            es <- functions_deps DM.! i_staging_sym = -- should always succeed
+
+          | Just es <- DM.lookup i_staging_sym functions_deps,
+            func <- function_map SM.! i_staging_sym = -- should always succeed
             (es <> i_child_syms_acc, extendFunctionMap o_m_acc i_staging_sym func)
           | verbose_err =
             ( i_child_syms_acc,
