@@ -12,20 +12,23 @@
 module Asterius.Types.DependencyMap
   ( DependencyMap,
     toDependencyMap,
+    lookup,
     (!),
   )
 where
 
 import Asterius.Types.EntitySymbol
 import Asterius.Types.SymbolMap (SymbolMap)
+import qualified Asterius.Types.SymbolMap as SM
 import Asterius.Types.SymbolSet (SymbolSet)
 import Binary
 import Control.DeepSeq
 import Data.Coerce
 import Data.Data
 import GHC.Stack
+import Prelude hiding (lookup)
 
-newtype DependencyMap = DependencyMap {fromDependencyMap :: SymbolMap SymbolSet}
+newtype DependencyMap = DependencyMap (SymbolMap SymbolSet)
   deriving newtype (Eq, Semigroup, Monoid, NFData, Binary)
   deriving stock (Data)
 
@@ -38,10 +41,14 @@ instance Show DependencyMap where
 toDependencyMap :: SymbolMap SymbolSet -> DependencyMap
 toDependencyMap = coerce
 
+-- | /O(min(n,W))/. Lookup the value at an 'EntitySymbol' in the map.
+lookup :: EntitySymbol -> DependencyMap -> Maybe SymbolSet
+lookup = coerce (SM.lookup @SymbolSet)
+
 -- | /O(min(n,W))/. Find the value at an 'EntitySymbol'. Calls 'error' when the
 -- element can not be found.
 {-# INLINE (!) #-}
 (!) :: HasCallStack => DependencyMap -> EntitySymbol -> SymbolSet
-(!) = coerce (!)
+(!) = coerce ((SM.!) @SymbolSet)
 
 infixl 9 !
