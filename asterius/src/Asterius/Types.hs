@@ -132,17 +132,18 @@ instance Monoid AsteriusModule where
 -- segments and function definitions (see function 'toCachedModule').
 data AsteriusCachedModule
   = AsteriusCachedModule
-      { dependencyMap :: DM.DependencyMap,
+      { staticsDependencyMap :: DM.DependencyMap,
+        functionDependencyMap :: DM.DependencyMap,
         fromCachedModule :: AsteriusModule
       }
   deriving (Show, Data)
 
 instance Semigroup AsteriusCachedModule where
-  AsteriusCachedModule dm0 m0 <> AsteriusCachedModule dm1 m1 =
-    AsteriusCachedModule (dm0 <> dm1) (m0 <> m1)
+  AsteriusCachedModule sdm0 fdm0 m0 <> AsteriusCachedModule sdm1 fdm1 m1 =
+    AsteriusCachedModule (sdm0 <> sdm1) (fdm0 <> fdm1) (m0 <> m1)
 
 instance Monoid AsteriusCachedModule where
-  mempty = AsteriusCachedModule mempty mempty
+  mempty = AsteriusCachedModule mempty mempty mempty
 
 -- | Convert an 'AsteriusModule' to an 'AsteriusCachedModule' by laboriously
 -- computing the dependency graph for each 'EntitySymbol'. Historical note: we
@@ -153,10 +154,9 @@ instance Monoid AsteriusCachedModule where
 toCachedModule :: AsteriusModule -> AsteriusCachedModule
 toCachedModule m =
   AsteriusCachedModule
-    { fromCachedModule = m,
-      dependencyMap =
-        DM.toDependencyMap $
-          staticsMap m `add` (functionMap m `add` SM.empty)
+    { staticsDependencyMap = DM.toDependencyMap $ staticsMap m `add` SM.empty,
+      functionDependencyMap = DM.toDependencyMap $ functionMap m `add` SM.empty,
+      fromCachedModule = m
     }
   where
     add :: Data a => SymbolMap a -> SymbolMap SymbolSet -> SymbolMap SymbolSet
