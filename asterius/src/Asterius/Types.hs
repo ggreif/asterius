@@ -16,6 +16,7 @@ module Asterius.Types
     AsteriusStaticsType (..),
     AsteriusStatics (..),
     AsteriusModule (..),
+    ModuleMetadata(..),
     AsteriusCachedModule(..),
     toCachedModule,
     EntitySymbol,
@@ -127,23 +128,45 @@ instance Semigroup AsteriusModule where
 instance Monoid AsteriusModule where
   mempty = AsteriusModule mempty mempty mempty mempty mempty
 
+-- TODO: This should replace all uses of AsteriusCachedModule basically.
+data ModuleMetadata
+  = ModuleMetadata
+      { staticsDependencyMap :: DM.DependencyMap,
+        functionDependencyMap :: DM.DependencyMap,
+        -- TODO: for now we duplicate the whole FFIMarshalState but we will probably
+        -- prefer to have an index here, if that is possible.
+        metaFFIMarshalState :: FFIMarshalState
+        -- TODO: Add the index here!
+      }
+  deriving (Show, Data)
+
+instance Semigroup ModuleMetadata where
+  ModuleMetadata sdm0 fdm0 mod_ffi_state0 <> ModuleMetadata sdm1 fdm1 mod_ffi_state1 =
+    ModuleMetadata
+      (sdm0 <> sdm1)
+      (fdm0 <> fdm1)
+      (mod_ffi_state0 <> mod_ffi_state1)
+
+instance Monoid ModuleMetadata where
+  mempty = ModuleMetadata mempty mempty mempty
+
 -- | An 'AsteriusCachedModule' in an 'AsteriusModule' along with  with all of
 -- its 'EntitySymbol' dependencies, as they are appear in the modules data
 -- segments and function definitions (see function 'toCachedModule').
+-- TODO: Remove eventually.
 data AsteriusCachedModule
   = AsteriusCachedModule
-      { staticsDependencyMap :: DM.DependencyMap,
-        functionDependencyMap :: DM.DependencyMap,
+      { cachedMetadata :: ModuleMetadata,
         fromCachedModule :: AsteriusModule
       }
   deriving (Show, Data)
 
 instance Semigroup AsteriusCachedModule where
-  AsteriusCachedModule sdm0 fdm0 m0 <> AsteriusCachedModule sdm1 fdm1 m1 =
-    AsteriusCachedModule (sdm0 <> sdm1) (fdm0 <> fdm1) (m0 <> m1)
+  AsteriusCachedModule meta0 m0 <> AsteriusCachedModule meta1 m1 =
+    AsteriusCachedModule (meta0 <> meta1) (m0 <> m1)
 
 instance Monoid AsteriusCachedModule where
-  mempty = AsteriusCachedModule mempty mempty mempty
+  mempty = AsteriusCachedModule mempty mempty
 
 -- | Convert an 'AsteriusModule' to an 'AsteriusCachedModule' by laboriously
 -- computing the dependency graph for each 'EntitySymbol'. Historical note: we
@@ -154,8 +177,12 @@ instance Monoid AsteriusCachedModule where
 toCachedModule :: AsteriusModule -> AsteriusCachedModule
 toCachedModule m =
   AsteriusCachedModule
-    { staticsDependencyMap = DM.toDependencyMap $ staticsMap m `add` SM.empty,
-      functionDependencyMap = DM.toDependencyMap $ functionMap m `add` SM.empty,
+    { cachedMetadata =
+        ModuleMetadata
+          { staticsDependencyMap = DM.toDependencyMap $ staticsMap m `add` SM.empty,
+            functionDependencyMap = DM.toDependencyMap $ functionMap m `add` SM.empty,
+            metaFFIMarshalState = ffiMarshalState m -- TODO: hate to duplicate this.
+          },
       fromCachedModule = m
     }
   where
@@ -626,6 +653,8 @@ $(genNFData ''AsteriusStatics)
 
 $(genNFData ''AsteriusModule)
 
+$(genNFData ''ModuleMetadata)
+
 $(genNFData ''AsteriusCachedModule)
 
 $(genNFData ''UnresolvedLocalReg)
@@ -691,6 +720,8 @@ $(genBinary ''AsteriusStaticsType)
 $(genBinary ''AsteriusStatics)
 
 $(genBinary ''AsteriusModule)
+
+$(genBinary ''ModuleMetadata)
 
 $(genBinary ''AsteriusCachedModule)
 

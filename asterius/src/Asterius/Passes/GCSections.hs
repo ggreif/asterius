@@ -1,3 +1,4 @@
+{-# LANGUAGE DuplicateRecordFields #-} -- TODO: eventually remove.
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -57,8 +58,8 @@ gcSections verbose_err c_store_mod root_syms export_funcs =
     final_m = buildGCModule
                 verbose_err
                 all_root_syms
-                (staticsDependencyMap c_store_mod)
-                (functionDependencyMap c_store_mod)
+                (staticsDependencyMap $ cachedMetadata c_store_mod)
+                (functionDependencyMap $ cachedMetadata c_store_mod)
                 (staticsMap store_mod)
                 (functionMap store_mod)
                 (staticsErrorMap store_mod)
