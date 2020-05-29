@@ -130,9 +130,10 @@ linkStart debug gc_sections verbose_err in_memory_m store objects_m archives_m r
       }
   )
   where
+    -- TODO: the store must be passed separately (no location on drive)
     combined_input = toCachedModule in_memory_m <> store <> objects_m <> archives_m
     merged_m0
-      | gc_sections = gcSections verbose_err combined_input root_syms export_funcs
+      | gc_sections = gcSections verbose_err (cachedMetadata combined_input) (fromCachedModule combined_input) root_syms export_funcs
       | otherwise = fromCachedModule combined_input
     !merged_m0_evaluated = force merged_m0
     merged_m1

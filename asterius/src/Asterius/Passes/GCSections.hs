@@ -34,19 +34,20 @@ import Data.String
 
 gcSections ::
   Bool ->
-  AsteriusCachedModule ->
+  ModuleMetadata ->
+  -- | TODO: eventually drop
+  AsteriusModule ->
   SS.SymbolSet ->
   [EntitySymbol] ->
   AsteriusModule
-gcSections verbose_err c_store_mod root_syms export_funcs =
+gcSections verbose_err meta store_mod root_syms export_funcs =
   final_m
     { sptMap = spt_map,
       ffiMarshalState = ffi_this
     }
   where
     -- inputs
-    store_mod = fromCachedModule c_store_mod
-    ffi_all = ffiMarshalState store_mod
+    ffi_all = metaFFIMarshalState meta
     ffi_exports =
       ffiExportDecls ffi_all `SM.restrictKeys` SS.fromList export_funcs
     -- Real root symbols include the given root symbols and the exported functions.
@@ -58,11 +59,14 @@ gcSections verbose_err c_store_mod root_syms export_funcs =
     final_m = buildGCModule  -- TODO: eventually: buildGCModule verbose_err all_root_syms meta
                 verbose_err
                 all_root_syms
-                (staticsDependencyMap $ cachedMetadata c_store_mod)
-                (functionDependencyMap $ cachedMetadata c_store_mod)
+                meta
                 (staticsMap store_mod)
                 (functionMap store_mod)
                 (staticsErrorMap store_mod)
+
+    -- TODO: it seems that the static pointers map either (a) needs
+    -- to be in the metadata (b) needs an index in the metadata. The
+    -- metadata gets quite populated :/
     spt_map =
       sptMap store_mod `SM.restrictKeys` SM.keysSet (staticsMap final_m)
     ffi_this =
@@ -75,8 +79,7 @@ gcSections verbose_err c_store_mod root_syms export_funcs =
 buildGCModule ::
   Bool ->
   SS.SymbolSet ->
-  DM.DependencyMap ->
-  DM.DependencyMap ->
+  ModuleMetadata ->
   -- TODO: Eventually get rid of (pass offset index instead)
   SM.SymbolMap AsteriusStatics ->
   -- TODO: Eventually get rid of (pass offset index instead)
@@ -84,7 +87,7 @@ buildGCModule ::
   -- TODO: Eventually get rid of (pass offset index instead)
   SM.SymbolMap AsteriusCodeGenError ->
   AsteriusModule
-buildGCModule verbose_err root_syms statics_deps functions_deps statics_map function_map error_map = go (root_syms, SS.empty, mempty)
+buildGCModule verbose_err root_syms meta statics_map function_map error_map = go (root_syms, SS.empty, mempty)
   where
     go (i_staging_syms, i_acc_syms, i_m)
       | SS.null i_staging_syms = i_m
@@ -94,11 +97,10 @@ buildGCModule verbose_err root_syms statics_deps functions_deps statics_map func
         (i_child_syms, o_m) = SS.foldr' step (SS.empty, i_m) i_staging_syms
         o_staging_syms = i_child_syms `SS.difference` o_acc_syms
         step i_staging_sym (i_child_syms_acc, o_m_acc)
-          | Just es <- DM.lookup i_staging_sym statics_deps,
+          | Just es <- i_staging_sym `DM.lookup` staticsDependencyMap meta,
             ss <- statics_map SM.! i_staging_sym = -- should always succeed
             (es <> i_child_syms_acc, extendStaticsMap o_m_acc i_staging_sym ss)
-
-          | Just es <- DM.lookup i_staging_sym functions_deps,
+          | Just es <- i_staging_sym `DM.lookup` functionDependencyMap meta,
             func <- function_map SM.! i_staging_sym = -- should always succeed
             (es <> i_child_syms_acc, extendFunctionMap o_m_acc i_staging_sym func)
           | verbose_err =
