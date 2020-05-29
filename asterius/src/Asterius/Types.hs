@@ -201,15 +201,18 @@ instance Monoid AsteriusCachedModule where
 toCachedModule :: AsteriusModule -> AsteriusCachedModule
 toCachedModule m =
   AsteriusCachedModule
-    { cachedMetadata =
-        ModuleMetadata
-          { staticsDependencyMap = DM.toDependencyMap $ staticsMap m `add` SM.empty,
-            functionDependencyMap = DM.toDependencyMap $ functionMap m `add` SM.empty,
-            errorsDependencyMap = DM.toDependencyMap $ staticsErrorMap m `add` SM.empty,
-            entitySymbolIndex = mempty, -- TODO (toCachedModule should go away anyway)
-            metaFFIMarshalState = ffiMarshalState m -- TODO: hate to duplicate this.
-          },
+    { cachedMetadata = createMetadata m,
       fromCachedModule = m
+    }
+
+createMetadata :: AsteriusModule -> ModuleMetadata
+createMetadata m =
+  ModuleMetadata
+    { staticsDependencyMap = DM.toDependencyMap $ staticsMap m `add` SM.empty,
+      functionDependencyMap = DM.toDependencyMap $ functionMap m `add` SM.empty,
+      errorsDependencyMap = DM.toDependencyMap $ staticsErrorMap m `add` SM.empty,
+      entitySymbolIndex = mempty, -- TODO empty, but we need extra field for in-memory entities.
+      metaFFIMarshalState = ffiMarshalState m -- TODO: hate to duplicate this.
     }
   where
     add :: Data a => SymbolMap a -> SymbolMap SymbolSet -> SymbolMap SymbolSet
