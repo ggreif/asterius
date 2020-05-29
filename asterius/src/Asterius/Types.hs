@@ -154,6 +154,7 @@ data ModuleMetadata
   = ModuleMetadata
       { staticsDependencyMap :: DM.DependencyMap,
         functionDependencyMap :: DM.DependencyMap,
+        errorsDependencyMap :: DM.DependencyMap,
         entitySymbolIndex :: SM.SymbolMap EntityLocation,
         -- TODO: for now we duplicate the whole FFIMarshalState but we will probably
         -- prefer to have an index here, if that is possible.
@@ -162,15 +163,16 @@ data ModuleMetadata
   deriving (Show, Data)
 
 instance Semigroup ModuleMetadata where
-  ModuleMetadata sdm0 fdm0 idx0 mod_ffi_state0 <> ModuleMetadata sdm1 fdm1 idx1 mod_ffi_state1 =
+  ModuleMetadata sdm0 fdm0 edm0 idx0 mod_ffi_state0 <> ModuleMetadata sdm1 fdm1 edm1 idx1 mod_ffi_state1 =
     ModuleMetadata
       (sdm0 <> sdm1)
       (fdm0 <> fdm1)
+      (edm0 <> edm1)
       (idx0 <> idx1)
       (mod_ffi_state0 <> mod_ffi_state1)
 
 instance Monoid ModuleMetadata where
-  mempty = ModuleMetadata mempty mempty mempty mempty
+  mempty = ModuleMetadata mempty mempty mempty mempty mempty
 
 -- | An 'AsteriusCachedModule' in an 'AsteriusModule' along with  with all of
 -- its 'EntitySymbol' dependencies, as they are appear in the modules data
@@ -203,6 +205,7 @@ toCachedModule m =
         ModuleMetadata
           { staticsDependencyMap = DM.toDependencyMap $ staticsMap m `add` SM.empty,
             functionDependencyMap = DM.toDependencyMap $ functionMap m `add` SM.empty,
+            errorsDependencyMap = DM.toDependencyMap $ staticsErrorMap m `add` SM.empty,
             entitySymbolIndex = mempty, -- TODO (toCachedModule should go away anyway)
             metaFFIMarshalState = ffiMarshalState m -- TODO: hate to duplicate this.
           },
