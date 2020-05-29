@@ -829,7 +829,7 @@ generateWrapperFunction func_sym Function {functionType = FunctionType {..}} =
 -- edits their implementation using 'generateWrapperFunction'
 generateWrapperModule :: AsteriusModule -> AsteriusModule
 generateWrapperModule m =
-  m
+  m -- TODO: Maybe map directly over the SymbolMap instead of converting to a list and back?
     { functionMap = SM.fromList $ map wrap $ SM.toList $ functionMap m
     }
   where

@@ -15,6 +15,22 @@ import qualified Asterius.Types.SymbolMap as SM
 import qualified Asterius.Types.SymbolSet as SS
 import Data.String
 
+
+-- TODO: Add a couple of comments about why we create the final
+-- @ffiImportDecls@ the way we do:
+--
+-- As it can be seen in Asterius.Builtins, for each JSFFI import we have two
+-- different things:
+-- * The first is a FunctionImport, which is a wasm function import
+-- * The second is a function wrapper which takes care of the i64/f64
+--   conversion (for both arguments and results) and internally calls the real
+--   function import.
+--
+-- Now, during GC, after we have the full set of used functions, some of the
+-- functions may be JSFFI import function wrappers. So, given the wrapper
+-- function symbols, we filter the JSFFI import declarations which actually
+-- correspond to those symbols.
+
 gcSections ::
   Bool ->
   AsteriusCachedModule ->
