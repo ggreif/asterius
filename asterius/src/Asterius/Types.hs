@@ -17,6 +17,7 @@ module Asterius.Types
     AsteriusStatics (..),
     AsteriusModule (..),
     ModuleMetadata(..),
+    AsteriusRepModule(..),
     AsteriusCachedModule(..),
     toCachedModule,
     EntitySymbol,
@@ -105,6 +106,8 @@ data AsteriusStatics
       }
   deriving (Show, Data)
 
+----------------------------------------------------------------------------
+
 data AsteriusModule
   = AsteriusModule
       { staticsMap :: SymbolMap AsteriusStatics,
@@ -127,6 +130,8 @@ instance Semigroup AsteriusModule where
 instance Monoid AsteriusModule where
   mempty = AsteriusModule mempty mempty mempty mempty mempty
 
+----------------------------------------------------------------------------
+
 -- | Location of an 'EntitySymbol' on drive. To be able to retrieve the entity
 -- itself, depending on its origin, we have two cases:
 -- * For entities originating in object files it suffices to know (a) the name
@@ -147,6 +152,8 @@ data EntityLocation
         srcOffset :: Integer
       }
   deriving (Show, Data)
+
+----------------------------------------------------------------------------
 
 -- TODO: This should replace all uses of AsteriusCachedModule basically.
 data ModuleMetadata
@@ -173,10 +180,38 @@ instance Semigroup ModuleMetadata where
 instance Monoid ModuleMetadata where
   mempty = ModuleMetadata mempty mempty mempty mempty mempty
 
+----------------------------------------------------------------------------
+
+-- | An 'AsteriusRepModule' is the representation of an 'AsteriusModule' before
+-- @gcSections@ has processed it. Note that this representation is supposed to
+-- capture ALL data, whether it comes from object files (in @repMetadata@),
+-- archive files (in @repMetadata@), or entities created using our EDSL (in
+-- @inMemoryModule@). So, the picture should look as follows:
+--
+-- > On disk                  : AsteriusCachedModule
+-- > In memory before GC pass : AsteriusRepModule
+-- > In memory after GC pass  : AsteriusModule
+data AsteriusRepModule
+  = AsteriusRepModule
+      { -- | All metadata for the module, as obtained from object and archive files.
+        repMetadata :: ModuleMetadata,
+        -- | In-memory parts of the module that are not yet stored anywhere on disk yet.
+        inMemoryModule :: AsteriusModule
+      }
+  deriving (Show, Data)
+
+instance Semigroup AsteriusRepModule where
+  AsteriusRepModule meta0 inmem0 <> AsteriusRepModule meta1 inmem1 =
+    AsteriusRepModule (meta0 <> meta1) (inmem0 <> inmem1)
+
+instance Monoid AsteriusRepModule where
+  mempty = AsteriusRepModule mempty mempty
+
+----------------------------------------------------------------------------
+
 -- | An 'AsteriusCachedModule' in an 'AsteriusModule' along with  with all of
 -- its 'EntitySymbol' dependencies, as they are appear in the modules data
 -- segments and function definitions (see function 'toCachedModule').
--- TODO: Remove eventually.
 data AsteriusCachedModule
   = AsteriusCachedModule
       { cachedMetadata :: ModuleMetadata,
@@ -210,7 +245,9 @@ createMetadata m =
     { staticsDependencyMap = staticsMap m `add` SM.empty,
       functionDependencyMap = functionMap m `add` SM.empty,
       errorsDependencyMap = staticsErrorMap m `add` SM.empty,
-      entitySymbolIndex = mempty, -- TODO empty, but we need extra field for in-memory entities.
+      -- TODO empty for now but this is wrong. The @entitySymbolIndex@ can only
+      -- be created once we have actually put the thing on disk. Fix this.
+      entitySymbolIndex = mempty,
       metaFFIMarshalState = ffiMarshalState m -- TODO: hate to duplicate this.
     }
   where
@@ -224,6 +261,8 @@ createMetadata m =
         SS.singleton t
       | otherwise =
         gmapQl (<>) SS.empty collectEntitySymbols t
+
+----------------------------------------------------------------------------
 
 data UnresolvedLocalReg
   = UniqueLocalReg Int ValueType
@@ -685,6 +724,8 @@ $(genNFData ''EntityLocation)
 
 $(genNFData ''ModuleMetadata)
 
+$(genNFData ''AsteriusRepModule)
+
 $(genNFData ''AsteriusCachedModule)
 
 $(genNFData ''UnresolvedLocalReg)
@@ -754,6 +795,8 @@ $(genBinary ''AsteriusModule)
 $(genBinary ''EntityLocation)
 
 $(genBinary ''ModuleMetadata)
+
+$(genBinary ''AsteriusRepModule)
 
 $(genBinary ''AsteriusCachedModule)
 
