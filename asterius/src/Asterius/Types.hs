@@ -18,6 +18,7 @@ module Asterius.Types
     AsteriusModule (..),
     ModuleMetadata(..),
     AsteriusRepModule(..),
+    fromAsteriusRepModule,
     AsteriusCachedModule(..),
     toCachedModule,
     EntitySymbol,
@@ -206,6 +207,13 @@ instance Semigroup AsteriusRepModule where
 
 instance Monoid AsteriusRepModule where
   mempty = AsteriusRepModule mempty mempty
+
+-- | In case we don't want @gcSections@ to be selective, we must be able to
+-- convert an 'AsteriusRepModule' to an 'AsteriusModule', by loading everything
+-- from disk and combining it with the parts of 'AsteriusModule' we have in
+-- memory (in 'inMemoryModule'). That's what 'fromAsteriusRepModule' does.
+fromAsteriusRepModule :: AsteriusRepModule -> AsteriusModule
+fromAsteriusRepModule = error "TODO"
 
 ----------------------------------------------------------------------------
 

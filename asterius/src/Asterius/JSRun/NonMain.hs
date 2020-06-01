@@ -16,15 +16,15 @@ import Asterius.Main.Task
 import Asterius.Resolve
 import Asterius.Types
   ( EntitySymbol,
-    AsteriusCachedModule,
+    AsteriusRepModule,
     Module,
   )
 import Data.String
 import Language.JavaScript.Inline.Core
 import System.FilePath
 
-linkNonMain :: AsteriusCachedModule -> [EntitySymbol] -> (Module, LinkReport)
-linkNonMain store_m extra_syms = (m, link_report)
+linkNonMain :: AsteriusRepModule -> [EntitySymbol] -> (Module, LinkReport)
+linkNonMain module_rep extra_syms = (m, link_report)
   where
     (_, m, link_report) =
       linkModules
@@ -33,7 +33,7 @@ linkNonMain store_m extra_syms = (m, link_report)
             linkOutput = "",
             linkObjs = [],
             linkLibs = [],
-            linkModule = store_m,
+            linkModule = mempty,
             Asterius.Ld.hasMain = False,
             Asterius.Ld.debug = False,
             Asterius.Ld.gcSections = True,
@@ -42,8 +42,7 @@ linkNonMain store_m extra_syms = (m, link_report)
             rootSymbols = extra_syms,
             Asterius.Ld.exportFunctions = []
           }
-        mempty
-        mempty
+        module_rep
 
 distNonMain ::
   FilePath -> [EntitySymbol] -> (Module, LinkReport) -> IO ()
@@ -68,10 +67,10 @@ newAsteriusInstanceNonMain ::
   JSSession ->
   FilePath ->
   [EntitySymbol] ->
-  AsteriusCachedModule ->
+  AsteriusRepModule ->
   IO JSVal
-newAsteriusInstanceNonMain s p extra_syms m = do
-  distNonMain p extra_syms $ linkNonMain m extra_syms
+newAsteriusInstanceNonMain s p extra_syms module_rep = do
+  distNonMain p extra_syms $ linkNonMain module_rep extra_syms
   let rts_path = dataDir </> "rts" </> "rts.mjs"
       req_path = p -<.> "req.mjs"
       wasm_path = p -<.> "wasm"

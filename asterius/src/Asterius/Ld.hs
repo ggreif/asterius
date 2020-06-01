@@ -29,7 +29,7 @@ data LinkTask
   = LinkTask
       { progName, linkOutput :: FilePath,
         linkObjs, linkLibs :: [FilePath],
-        linkModule :: AsteriusCachedModule,
+        linkModule :: AsteriusModule,
         hasMain, debug, gcSections, verboseErr :: Bool,
         outputIR :: Maybe FilePath,
         rootSymbols, exportFunctions :: [EntitySymbol]
@@ -42,12 +42,15 @@ data LinkTask
 -- deserialization failures. Hence, when we deserialize objects to be linked in
 -- 'loadTheWorld', we choose to be overpermissive and silently ignore
 -- deserialization failures. This has worked well so far.
-loadTheWorld :: LinkTask -> IO (AsteriusCachedModule, AsteriusCachedModule)
+loadTheWorld :: LinkTask -> IO AsteriusRepModule
 loadTheWorld LinkTask {..} = do
   ncu <- newNameCacheUpdater
   lib <- mconcat <$> for linkLibs (loadAr ncu)
   objs <- rights <$> for linkObjs (tryGetFile ncu)
-  return (mconcat objs, lib)
+  return AsteriusRepModule
+    { repMetadata = mconcat objs <> lib,
+      inMemoryModule = linkModule
+    }
 
 -- | The *_info are generated from Cmm using the INFO_TABLE macro.
 -- For example, see StgMiscClosures.cmm / Exception.cmm
@@ -90,24 +93,14 @@ rtsPrivateSymbols =
 
 linkModules ::
   LinkTask ->
-  AsteriusCachedModule ->
-  AsteriusCachedModule ->
+  AsteriusRepModule ->
   (AsteriusModule, Module, LinkReport)
-linkModules LinkTask {..} objects_m archives_m =
+linkModules LinkTask {..} module_rep =
   linkStart
     debug
     gcSections
     verboseErr
-    ( (if hasMain then mainBuiltins else mempty)
-        <> rtsAsteriusModule
-          defaultBuiltinsOptions
-            { Asterius.Builtins.progName = progName,
-              Asterius.Builtins.debug = debug
-            }
-    )
-    linkModule
-    objects_m
-    archives_m
+    (module_rep{inMemoryModule = inMemoryModule module_rep <> builtin_m})
     ( SS.unions
         [ SS.fromList rootSymbols,
           rtsUsedSymbols,
@@ -119,11 +112,19 @@ linkModules LinkTask {..} objects_m archives_m =
         ]
     )
     exportFunctions
+  where
+    builtin_m =
+      (if hasMain then mainBuiltins else mempty)
+        <> rtsAsteriusModule
+          defaultBuiltinsOptions
+            { Asterius.Builtins.progName = progName,
+              Asterius.Builtins.debug = debug
+            }
 
 linkExeInMemory :: LinkTask -> IO (AsteriusModule, Module, LinkReport)
 linkExeInMemory ld_task = do
-  (objects_m, archives_m) <- loadTheWorld ld_task
-  evaluate $ linkModules ld_task objects_m archives_m
+  module_rep <- loadTheWorld ld_task
+  evaluate $ linkModules ld_task module_rep
 
 linkExe :: LinkTask -> IO ()
 linkExe ld_task@LinkTask {..} = do

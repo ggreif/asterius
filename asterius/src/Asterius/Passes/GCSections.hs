@@ -33,19 +33,20 @@ import Data.String
 
 gcSections ::
   Bool ->
-  ModuleMetadata ->
-  -- | TODO: eventually drop
-  AsteriusModule ->
+  AsteriusRepModule ->
   SS.SymbolSet ->
   [EntitySymbol] ->
   AsteriusModule
-gcSections verbose_err meta store_mod root_syms export_funcs =
+gcSections verbose_err module_rep root_syms export_funcs =
   final_m
     { sptMap = spt_map,
       ffiMarshalState = ffi_this
     }
   where
     -- inputs
+    meta = repMetadata module_rep
+    store_mod = inMemoryModule module_rep
+
     ffi_all = metaFFIMarshalState meta
     ffi_exports =
       ffiExportDecls ffi_all `SM.restrictKeys` SS.fromList export_funcs
