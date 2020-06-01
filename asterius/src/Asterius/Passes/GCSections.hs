@@ -56,12 +56,10 @@ gcSections verbose_err module_rep root_syms export_funcs =
       SS.fromList [ffiExportClosure | FFIExportDecl {..} <- SM.elems ffi_exports]
         <> root_syms
     -- outputs
-    final_m = buildGCModule  -- TODO: eventually: buildGCModule verbose_err all_root_syms meta
+    final_m = buildGCModule  -- TODO: eventually: buildGCModule verbose_err all_root_syms module_rep
                 verbose_err
                 all_root_syms
-                meta
-                (staticsMap store_mod)
-                (functionMap store_mod)
+                module_rep
                 (staticsErrorMap store_mod)
 
     -- TODO: it seems that the static pointers map either (a) needs
@@ -79,15 +77,11 @@ gcSections verbose_err module_rep root_syms export_funcs =
 buildGCModule ::
   Bool ->
   SS.SymbolSet ->
-  ModuleMetadata ->
-  -- TODO: Eventually get rid of (pass offset index instead)
-  SM.SymbolMap AsteriusStatics ->
-  -- TODO: Eventually get rid of (pass offset index instead)
-  SM.SymbolMap Function ->
+  AsteriusRepModule ->
   -- TODO: Eventually get rid of (pass offset index instead)
   SM.SymbolMap AsteriusCodeGenError ->
   AsteriusModule
-buildGCModule verbose_err root_syms meta statics_map function_map error_map = go (root_syms, SS.empty, mempty)
+buildGCModule verbose_err root_syms module_rep error_map = go (root_syms, SS.empty, mempty)
   where
     go (i_staging_syms, i_acc_syms, i_m)
       | SS.null i_staging_syms = i_m
@@ -97,11 +91,11 @@ buildGCModule verbose_err root_syms meta statics_map function_map error_map = go
         (i_child_syms, o_m) = SS.foldr' step (SS.empty, i_m) i_staging_syms
         o_staging_syms = i_child_syms `SS.difference` o_acc_syms
         step i_staging_sym (i_child_syms_acc, o_m_acc)
-          | Just es <- i_staging_sym `SM.lookup` staticsDependencyMap meta,
-            ss <- statics_map SM.! i_staging_sym = -- should always succeed
+          | Just es <- i_staging_sym `SM.lookup` staticsDependencyMap (repMetadata module_rep),
+            ss <- findStatics module_rep i_staging_sym = -- should always succeed
             (es <> i_child_syms_acc, extendStaticsMap o_m_acc i_staging_sym ss)
-          | Just es <- i_staging_sym `SM.lookup` functionDependencyMap meta,
-            func <- function_map SM.! i_staging_sym = -- should always succeed
+          | Just es <- i_staging_sym `SM.lookup` functionDependencyMap (repMetadata module_rep),
+            func <- findFunction module_rep i_staging_sym = -- should always succeed
             (es <> i_child_syms_acc, extendFunctionMap o_m_acc i_staging_sym func)
           | verbose_err =
             ( i_child_syms_acc,

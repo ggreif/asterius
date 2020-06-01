@@ -19,6 +19,9 @@ module Asterius.Types
     ModuleMetadata(..),
     AsteriusRepModule(..),
     fromAsteriusRepModule,
+    findStatics,
+    findCodeGenError,
+    findFunction,
     AsteriusCachedModule(..),
     toCachedModule,
     EntitySymbol,
@@ -189,7 +192,7 @@ instance Monoid ModuleMetadata where
 -- archive files (in @repMetadata@), or entities created using our EDSL (in
 -- @inMemoryModule@). So, the picture should look as follows:
 --
--- > On disk                  : AsteriusCachedModule
+-- > On disk                  : AsteriusCachedModule (TODO: only conceptually)
 -- > In memory before GC pass : AsteriusRepModule
 -- > In memory after GC pass  : AsteriusModule
 data AsteriusRepModule
@@ -214,6 +217,21 @@ instance Monoid AsteriusRepModule where
 -- memory (in 'inMemoryModule'). That's what 'fromAsteriusRepModule' does.
 fromAsteriusRepModule :: AsteriusRepModule -> AsteriusModule
 fromAsteriusRepModule = error "TODO"
+
+-- Look up first in memory. If the data is not there, try to retrieve it from
+-- dist, through the metadata. If it is not there either, then fail.
+findStatics :: AsteriusRepModule -> EntitySymbol -> AsteriusStatics
+findStatics = error "TODO"
+
+-- Look up first in memory. If the data is not there, try to retrieve it from
+-- dist, through the metadata. If it is not there either, then fail.
+findCodeGenError :: AsteriusRepModule -> EntitySymbol -> AsteriusCodeGenError
+findCodeGenError = error "TODO"
+
+-- Look up first in memory. If the data is not there, try to retrieve it from
+-- dist, through the metadata. If it is not there either, then fail.
+findFunction :: AsteriusRepModule -> EntitySymbol -> Function
+findFunction = error "TODO"
 
 ----------------------------------------------------------------------------
 
