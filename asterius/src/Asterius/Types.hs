@@ -3,6 +3,7 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StrictData #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -19,6 +20,7 @@ module Asterius.Types
     ModuleMetadata(..),
     AsteriusRepModule(..),
     fromAsteriusRepModule,
+    inMemoryToRepModule,
     findStatics,
     findCodeGenError,
     findFunction,
@@ -65,6 +67,7 @@ import Asterius.Types.SymbolMap (SymbolMap)
 import qualified Asterius.Types.SymbolMap as SM
 import Asterius.Types.SymbolSet (SymbolSet)
 import qualified Asterius.Types.SymbolSet as SS
+import qualified Binary as GHC
 import Control.DeepSeq
 import Control.Exception
 import qualified Data.ByteString as BS
@@ -157,6 +160,10 @@ data EntityLocation
       }
   deriving (Show, Data)
 
+-- | Find an entity on disk given its location. Fail if it's not there.
+findEntityOnDisk :: GHC.Binary a => EntitySymbol -> EntityLocation -> a
+findEntityOnDisk = error "TODO"
+
 ----------------------------------------------------------------------------
 
 -- TODO: This should replace all uses of AsteriusCachedModule basically.
@@ -165,7 +172,9 @@ data ModuleMetadata
       { staticsDependencyMap :: SymbolMap SymbolSet,
         functionDependencyMap :: SymbolMap SymbolSet,
         errorsDependencyMap :: SymbolMap SymbolSet,
-        entitySymbolIndex :: SM.SymbolMap EntityLocation,
+        staticsIndex :: SM.SymbolMap EntityLocation,
+        functionIndex :: SM.SymbolMap EntityLocation,
+        errorsIndex :: SM.SymbolMap EntityLocation,
         -- TODO: for now we duplicate the whole FFIMarshalState but we will probably
         -- prefer to have an index here, if that is possible.
         metaFFIMarshalState :: FFIMarshalState
@@ -173,16 +182,41 @@ data ModuleMetadata
   deriving (Show, Data)
 
 instance Semigroup ModuleMetadata where
-  ModuleMetadata sdm0 fdm0 edm0 idx0 mod_ffi_state0 <> ModuleMetadata sdm1 fdm1 edm1 idx1 mod_ffi_state1 =
+  ModuleMetadata sdm0 fdm0 edm0 sidx0 fidx0 eidx0 mod_ffi_state0 <> ModuleMetadata sdm1 fdm1 edm1 sidx1 fidx1 eidx1 mod_ffi_state1 =
     ModuleMetadata
       (sdm0 <> sdm1)
       (fdm0 <> fdm1)
       (edm0 <> edm1)
-      (idx0 <> idx1)
+      (sidx0 <> sidx1)
+      (fidx0 <> fidx1)
+      (eidx0 <> eidx1)
       (mod_ffi_state0 <> mod_ffi_state1)
 
 instance Monoid ModuleMetadata where
-  mempty = ModuleMetadata mempty mempty mempty mempty mempty
+  mempty = ModuleMetadata mempty mempty mempty mempty mempty mempty mempty
+
+createMetadata :: AsteriusModule -> ModuleMetadata
+createMetadata m =
+  ModuleMetadata
+    { staticsDependencyMap = staticsMap m `add` SM.empty,
+      functionDependencyMap = functionMap m `add` SM.empty,
+      errorsDependencyMap = staticsErrorMap m `add` SM.empty,
+      staticsIndex = mempty,
+      functionIndex = mempty,
+      errorsIndex = mempty,
+      metaFFIMarshalState = mempty -- ffiMarshalState m -- TODO: hate to duplicate this.
+    }
+  where
+    add :: Data a => SymbolMap a -> SymbolMap SymbolSet -> SymbolMap SymbolSet
+    add = flip $ SM.foldrWithKey' (\k e -> SM.insert k (collectEntitySymbols e))
+
+    -- Collect all entity symbols from an entity.
+    collectEntitySymbols :: Data a => a -> SymbolSet
+    collectEntitySymbols t
+      | Just TR.HRefl <- TR.eqTypeRep (TR.typeOf t) (TR.typeRep @EntitySymbol) =
+        SS.singleton t
+      | otherwise =
+        gmapQl (<>) SS.empty collectEntitySymbols t
 
 ----------------------------------------------------------------------------
 
@@ -211,27 +245,62 @@ instance Semigroup AsteriusRepModule where
 instance Monoid AsteriusRepModule where
   mempty = AsteriusRepModule mempty mempty
 
--- | In case we don't want @gcSections@ to be selective, we must be able to
--- convert an 'AsteriusRepModule' to an 'AsteriusModule', by loading everything
--- from disk and combining it with the parts of 'AsteriusModule' we have in
--- memory (in 'inMemoryModule'). That's what 'fromAsteriusRepModule' does.
+-- | Convert an 'AsteriusRepModule' to a self-contained 'AsteriusModule' by
+-- loading everything remaining from disk and combining it with the parts of
+-- 'AsteriusModule' we have in memory (in 'inMemoryModule').
 fromAsteriusRepModule :: AsteriusRepModule -> AsteriusModule
-fromAsteriusRepModule = error "TODO"
+fromAsteriusRepModule AsteriusRepModule{..} = from_disk <> inMemoryModule
+  where
+    from_disk =
+      AsteriusModule
+        { staticsMap = SM.mapWithKey findEntityOnDisk (staticsIndex repMetadata),
+          staticsErrorMap = SM.mapWithKey findEntityOnDisk (errorsIndex repMetadata),
+          functionMap = SM.mapWithKey findEntityOnDisk (functionIndex repMetadata),
+          sptMap = mempty, -- TODO
+          ffiMarshalState = metaFFIMarshalState repMetadata -- :: FFIMarshalState -- TODO
+        }
+
+-- | Convert an 'AsteriusModule' to an 'AsteriusRepModule' by laboriously
+-- computing the dependency graph for each 'EntitySymbol'.
+inMemoryToRepModule :: AsteriusModule -> AsteriusRepModule
+inMemoryToRepModule m =
+  AsteriusRepModule
+    { repMetadata = createMetadata m,
+      inMemoryModule = m
+    }
 
 -- Look up first in memory. If the data is not there, try to retrieve it from
 -- dist, through the metadata. If it is not there either, then fail.
 findStatics :: AsteriusRepModule -> EntitySymbol -> AsteriusStatics
-findStatics = error "TODO"
+findStatics AsteriusRepModule {..} sym
+  | Just statics <- SM.lookup sym (staticsMap inMemoryModule) =
+    statics
+  | Just loc <- SM.lookup sym (staticsIndex repMetadata) =
+    findEntityOnDisk sym loc
+  | otherwise =
+    error "TODO: impossible"
 
 -- Look up first in memory. If the data is not there, try to retrieve it from
 -- dist, through the metadata. If it is not there either, then fail.
 findCodeGenError :: AsteriusRepModule -> EntitySymbol -> AsteriusCodeGenError
-findCodeGenError = error "TODO"
+findCodeGenError AsteriusRepModule {..} sym
+  | Just err <- SM.lookup sym (staticsErrorMap inMemoryModule) =
+    err
+  | Just loc <- SM.lookup sym (errorsIndex repMetadata) =
+    findEntityOnDisk sym loc
+  | otherwise =
+    error "TODO: impossible"
 
 -- Look up first in memory. If the data is not there, try to retrieve it from
 -- dist, through the metadata. If it is not there either, then fail.
 findFunction :: AsteriusRepModule -> EntitySymbol -> Function
-findFunction = error "TODO"
+findFunction AsteriusRepModule {..} sym
+  | Just fun <- SM.lookup sym (functionMap inMemoryModule) =
+    fun
+  | Just loc <- SM.lookup sym (functionIndex repMetadata) =
+    findEntityOnDisk sym loc
+  | otherwise =
+    error "TODO: impossible"
 
 ----------------------------------------------------------------------------
 
@@ -262,31 +331,10 @@ toCachedModule :: AsteriusModule -> AsteriusCachedModule
 toCachedModule m =
   AsteriusCachedModule
     { cachedMetadata = createMetadata m,
-      fromCachedModule = m
-    }
-
-createMetadata :: AsteriusModule -> ModuleMetadata
-createMetadata m =
-  ModuleMetadata
-    { staticsDependencyMap = staticsMap m `add` SM.empty,
-      functionDependencyMap = functionMap m `add` SM.empty,
-      errorsDependencyMap = staticsErrorMap m `add` SM.empty,
       -- TODO empty for now but this is wrong. The @entitySymbolIndex@ can only
       -- be created once we have actually put the thing on disk. Fix this.
-      entitySymbolIndex = mempty,
-      metaFFIMarshalState = ffiMarshalState m -- TODO: hate to duplicate this.
+      fromCachedModule = m
     }
-  where
-    add :: Data a => SymbolMap a -> SymbolMap SymbolSet -> SymbolMap SymbolSet
-    add = flip $ SM.foldrWithKey' (\k e -> SM.insert k (collectEntitySymbols e))
-
-    -- Collect all entity symbols from an entity.
-    collectEntitySymbols :: Data a => a -> SymbolSet
-    collectEntitySymbols t
-      | Just TR.HRefl <- TR.eqTypeRep (TR.typeOf t) (TR.typeRep @EntitySymbol) =
-        SS.singleton t
-      | otherwise =
-        gmapQl (<>) SS.empty collectEntitySymbols t
 
 ----------------------------------------------------------------------------
 

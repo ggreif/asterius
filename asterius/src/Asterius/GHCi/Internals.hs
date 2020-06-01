@@ -488,7 +488,7 @@ asteriusHscCompileCoreExpr hsc_env srcspan ds_expr = do
     pure
       ( s
           { ghciCompiledCoreExprs =
-              IM.insert this_id (sym, mempty{inMemoryModule = m}) $
+              IM.insert this_id (sym, inMemoryToRepModule m) $
                 ghciCompiledCoreExprs s,
             ghciLastCompiledCoreExpr = this_id
           },

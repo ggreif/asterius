@@ -47,10 +47,7 @@ loadTheWorld LinkTask {..} = do
   ncu <- newNameCacheUpdater
   lib <- mconcat <$> for linkLibs (loadAr ncu)
   objs <- rights <$> for linkObjs (tryGetFile ncu)
-  return AsteriusRepModule
-    { repMetadata = mconcat objs <> lib,
-      inMemoryModule = linkModule
-    }
+  return $ mempty {repMetadata = mconcat objs <> lib} <> inMemoryToRepModule linkModule
 
 -- | The *_info are generated from Cmm using the INFO_TABLE macro.
 -- For example, see StgMiscClosures.cmm / Exception.cmm
@@ -100,7 +97,7 @@ linkModules LinkTask {..} module_rep =
     debug
     gcSections
     verboseErr
-    (module_rep{inMemoryModule = inMemoryModule module_rep <> builtin_m})
+    (module_rep <> inMemoryToRepModule builtin_m)
     ( SS.unions
         [ SS.fromList rootSymbols,
           rtsUsedSymbols,
