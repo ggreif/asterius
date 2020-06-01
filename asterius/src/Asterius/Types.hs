@@ -21,11 +21,11 @@ module Asterius.Types
     AsteriusRepModule(..),
     fromAsteriusRepModule,
     inMemoryToRepModule,
+    getCompleteSptMap,
+    getCompleteFFIMarshalState,
     findStatics,
     findCodeGenError,
     findFunction,
-    AsteriusCachedModule(..),
-    toCachedModule,
     EntitySymbol,
     entityName,
     mkEntitySymbol,
@@ -137,6 +137,29 @@ instance Semigroup AsteriusModule where
 instance Monoid AsteriusModule where
   mempty = AsteriusModule mempty mempty mempty mempty mempty
 
+instance GHC.Binary AsteriusModule where
+  get bh = do
+    -- TODO: would be much nicer to ignore these completely..
+    _ :: SymbolMap SymbolSet <- GHC.get bh -- cf. ModuleMetadata (staticsDependencyMap)
+    _ :: SymbolMap SymbolSet <- GHC.get bh -- cf. ModuleMetadata (functionDependencyMap)
+    _ :: SymbolMap SymbolSet <- GHC.get bh -- cf. ModuleMetadata (errorsDependencyMap)
+    staticsMap <- GHC.get bh
+    staticsErrorMap <- GHC.get bh
+    functionMap <- GHC.get bh
+    sptMap <- GHC.get bh
+    ffiMarshalState <- GHC.get bh
+    return AsteriusModule {..}
+
+  put_ bh AsteriusModule {..} = do
+    GHC.put_ bh $ createDependencyMap staticsMap
+    GHC.put_ bh $ createDependencyMap functionMap
+    GHC.put_ bh $ createDependencyMap staticsErrorMap
+    GHC.put_ bh staticsMap
+    GHC.put_ bh staticsErrorMap
+    GHC.put_ bh functionMap
+    GHC.put_ bh sptMap
+    GHC.put_ bh ffiMarshalState
+
 ----------------------------------------------------------------------------
 
 -- | Location of an 'EntitySymbol' on drive. To be able to retrieve the entity
@@ -167,17 +190,18 @@ findEntityOnDisk = error "TODO"
 
 ----------------------------------------------------------------------------
 
--- TODO: This should replace all uses of AsteriusCachedModule basically.
+-- | All the information about a module that is essential during resolution
+-- (linking).
 data ModuleMetadata
   = ModuleMetadata
-      { staticsDependencyMap :: SymbolMap SymbolSet,  -- dependencies
-        functionDependencyMap :: SymbolMap SymbolSet, -- dependencies
-        errorsDependencyMap :: SymbolMap SymbolSet,   -- dependencies
-        staticsIndex :: SM.SymbolMap EntityLocation,  -- loc on disk
-        functionIndex :: SM.SymbolMap EntityLocation, -- loc on disk
-        errorsIndex :: SM.SymbolMap EntityLocation,   -- loc on disk
-        metaSptMap :: SymbolMap (Word64, Word64),     -- as is
-        metaFFIMarshalState :: FFIMarshalState        -- as is
+      { staticsDependencyMap :: SymbolMap SymbolSet,  -- meta: dependencies
+        functionDependencyMap :: SymbolMap SymbolSet, -- meta: dependencies
+        errorsDependencyMap :: SymbolMap SymbolSet,   -- meta: dependencies
+        staticsIndex :: SM.SymbolMap EntityLocation,  -- meta: loc on disk
+        functionIndex :: SM.SymbolMap EntityLocation, -- meta: loc on disk
+        errorsIndex :: SM.SymbolMap EntityLocation,   -- meta: loc on disk
+        metaSptMap :: SymbolMap (Word64, Word64),     -- real: as is
+        metaFFIMarshalState :: FFIMarshalState        -- real: as is
       }
   deriving (Show, Data)
 
@@ -199,15 +223,18 @@ instance Monoid ModuleMetadata where
 createMetadata :: AsteriusModule -> ModuleMetadata
 createMetadata m =
   ModuleMetadata
-    { staticsDependencyMap = staticsMap m `add` SM.empty,
-      functionDependencyMap = functionMap m `add` SM.empty,
-      errorsDependencyMap = staticsErrorMap m `add` SM.empty,
+    { staticsDependencyMap = createDependencyMap $ staticsMap m,
+      functionDependencyMap = createDependencyMap $ functionMap m,
+      errorsDependencyMap = createDependencyMap $ staticsErrorMap m,
       staticsIndex = mempty,
       functionIndex = mempty,
       errorsIndex = mempty,
       metaSptMap = mempty,
       metaFFIMarshalState = mempty
     }
+
+createDependencyMap :: Data a => SymbolMap a -> SymbolMap SymbolSet
+createDependencyMap sm = sm `add` SM.empty
   where
     add :: Data a => SymbolMap a -> SymbolMap SymbolSet -> SymbolMap SymbolSet
     add = flip $ SM.foldrWithKey' (\k e -> SM.insert k (collectEntitySymbols e))
@@ -240,6 +267,32 @@ data AsteriusRepModule
       }
   deriving (Show, Data)
 
+instance GHC.Binary AsteriusRepModule where
+  get bh = do
+    -- Load metadata
+    sdm :: SymbolMap SymbolSet <- GHC.get bh -- cf. ModuleMetadata (staticsDependencyMap)
+    fdm :: SymbolMap SymbolSet <- GHC.get bh -- cf. ModuleMetadata (functionDependencyMap)
+    edm :: SymbolMap SymbolSet <- GHC.get bh -- cf. ModuleMetadata (errorsDependencyMap)
+    -- Load actual file. TODO: this is temporary; that's what we want to avoid.
+    staticsMap <- GHC.get bh
+    staticsErrorMap <- GHC.get bh
+    functionMap <- GHC.get bh
+    sptMap <- GHC.get bh
+    ffiMarshalState <- GHC.get bh
+    -- combine them
+    return AsteriusRepModule
+      { repMetadata = mempty
+          { staticsDependencyMap = sdm,
+            functionDependencyMap = fdm,
+            errorsDependencyMap = edm
+          },
+          inMemoryModule = AsteriusModule {..}
+      }
+
+  put_ _ _ = error "GHC.Binary.put_: AsteriusRepModule"
+  -- TODO: Alternatively:
+  --   put_ bh m = GHC.put_ bh $ fromAsteriusRepModule m
+
 instance Semigroup AsteriusRepModule where
   AsteriusRepModule meta0 inmem0 <> AsteriusRepModule meta1 inmem1 =
     AsteriusRepModule (meta0 <> meta1) (inmem0 <> inmem1)
@@ -271,6 +324,14 @@ inMemoryToRepModule m =
       inMemoryModule = m
     }
 
+getCompleteSptMap :: AsteriusRepModule -> SymbolMap (Word64, Word64)
+getCompleteSptMap AsteriusRepModule{..} =
+  metaSptMap repMetadata <> sptMap inMemoryModule
+
+getCompleteFFIMarshalState :: AsteriusRepModule -> FFIMarshalState
+getCompleteFFIMarshalState AsteriusRepModule{..} =
+  metaFFIMarshalState repMetadata <> ffiMarshalState inMemoryModule
+
 -- Look up first in memory. If the data is not there, try to retrieve it from
 -- dist, through the metadata. If it is not there either, then fail.
 findStatics :: AsteriusRepModule -> EntitySymbol -> AsteriusStatics
@@ -284,14 +345,14 @@ findStatics AsteriusRepModule {..} sym
 
 -- Look up first in memory. If the data is not there, try to retrieve it from
 -- dist, through the metadata. If it is not there either, then fail.
-findCodeGenError :: AsteriusRepModule -> EntitySymbol -> AsteriusCodeGenError
+findCodeGenError :: AsteriusRepModule -> EntitySymbol -> Maybe AsteriusCodeGenError
 findCodeGenError AsteriusRepModule {..} sym
   | Just err <- SM.lookup sym (staticsErrorMap inMemoryModule) =
-    err
+    Just err
   | Just loc <- SM.lookup sym (errorsIndex repMetadata) =
-    findEntityOnDisk sym loc
+    Just $ findEntityOnDisk sym loc
   | otherwise =
-    error "TODO: impossible"
+    Nothing
 
 -- Look up first in memory. If the data is not there, try to retrieve it from
 -- dist, through the metadata. If it is not there either, then fail.
@@ -303,40 +364,6 @@ findFunction AsteriusRepModule {..} sym
     findEntityOnDisk sym loc
   | otherwise =
     error "TODO: impossible"
-
-----------------------------------------------------------------------------
-
--- | An 'AsteriusCachedModule' in an 'AsteriusModule' along with  with all of
--- its 'EntitySymbol' dependencies, as they are appear in the modules data
--- segments and function definitions (see function 'toCachedModule').
-data AsteriusCachedModule
-  = AsteriusCachedModule
-      { cachedMetadata :: ModuleMetadata,
-        fromCachedModule :: AsteriusModule
-      }
-  deriving (Show, Data)
-
-instance Semigroup AsteriusCachedModule where
-  AsteriusCachedModule meta0 m0 <> AsteriusCachedModule meta1 m1 =
-    AsteriusCachedModule (meta0 <> meta1) (m0 <> m1)
-
-instance Monoid AsteriusCachedModule where
-  mempty = AsteriusCachedModule mempty mempty
-
--- | Convert an 'AsteriusModule' to an 'AsteriusCachedModule' by laboriously
--- computing the dependency graph for each 'EntitySymbol'. Historical note: we
--- used to compute the dependency graph during link time but that were quite
--- inefficient (see isssue #568). Instead, we now do the same work at
--- compile-time, thus creating object files containing 'AsteriusCachedModule's
--- instead of 'AsteriusModule's.
-toCachedModule :: AsteriusModule -> AsteriusCachedModule
-toCachedModule m =
-  AsteriusCachedModule
-    { cachedMetadata = createMetadata m,
-      -- TODO empty for now but this is wrong. The @entitySymbolIndex@ can only
-      -- be created once we have actually put the thing on disk. Fix this.
-      fromCachedModule = m
-    }
 
 ----------------------------------------------------------------------------
 
@@ -802,8 +829,6 @@ $(genNFData ''ModuleMetadata)
 
 $(genNFData ''AsteriusRepModule)
 
-$(genNFData ''AsteriusCachedModule)
-
 $(genNFData ''UnresolvedLocalReg)
 
 $(genNFData ''UnresolvedGlobalReg)
@@ -866,15 +891,7 @@ $(genBinary ''AsteriusStaticsType)
 
 $(genBinary ''AsteriusStatics)
 
-$(genBinary ''AsteriusModule)
-
 $(genBinary ''EntityLocation)
-
-$(genBinary ''ModuleMetadata)
-
-$(genBinary ''AsteriusRepModule)
-
-$(genBinary ''AsteriusCachedModule)
 
 $(genBinary ''UnresolvedLocalReg)
 

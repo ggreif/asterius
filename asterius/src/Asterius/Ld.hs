@@ -47,7 +47,7 @@ loadTheWorld LinkTask {..} = do
   ncu <- newNameCacheUpdater
   lib <- mconcat <$> for linkLibs (loadAr ncu)
   objs <- rights <$> for linkObjs (tryGetFile ncu)
-  return $ mempty {repMetadata = mconcat objs <> lib} <> inMemoryToRepModule linkModule
+  return $ mconcat objs <> lib <> inMemoryToRepModule linkModule
 
 -- | The *_info are generated from Cmm using the INFO_TABLE macro.
 -- For example, see StgMiscClosures.cmm / Exception.cmm
@@ -128,5 +128,5 @@ linkExe ld_task@LinkTask {..} = do
   (pre_m, m, link_report) <- linkExeInMemory ld_task
   putFile linkOutput (m, link_report)
   case outputIR of
-    Just p -> putFile p $ toCachedModule pre_m
+    Just p -> putFile p pre_m
     _ -> pure ()

@@ -44,10 +44,7 @@ gcSections verbose_err module_rep root_syms export_funcs =
     }
   where
     -- inputs
-    meta = repMetadata module_rep
-    store_mod = inMemoryModule module_rep
-
-    ffi_all = metaFFIMarshalState meta
+    ffi_all = getCompleteFFIMarshalState module_rep
     ffi_exports =
       ffiExportDecls ffi_all `SM.restrictKeys` SS.fromList export_funcs
     -- Real root symbols include the given root symbols and the exported functions.
@@ -56,17 +53,13 @@ gcSections verbose_err module_rep root_syms export_funcs =
       SS.fromList [ffiExportClosure | FFIExportDecl {..} <- SM.elems ffi_exports]
         <> root_syms
     -- outputs
-    final_m = buildGCModule  -- TODO: eventually: buildGCModule verbose_err all_root_syms module_rep
-                verbose_err
-                all_root_syms
-                module_rep
-                (staticsErrorMap store_mod)
+    final_m = buildGCModule verbose_err all_root_syms module_rep
 
     -- TODO: it seems that the static pointers map either (a) needs
     -- to be in the metadata (b) needs an index in the metadata. The
     -- metadata gets quite populated :/
     spt_map =
-      sptMap store_mod `SM.restrictKeys` SM.keysSet (staticsMap final_m)
+      getCompleteSptMap module_rep `SM.restrictKeys` SM.keysSet (staticsMap final_m)
     ffi_this =
       ffi_all
         { ffiImportDecls = flip SM.filterWithKey (ffiImportDecls ffi_all) $ \k _ ->
@@ -78,10 +71,8 @@ buildGCModule ::
   Bool ->
   SS.SymbolSet ->
   AsteriusRepModule ->
-  -- TODO: Eventually get rid of (pass offset index instead)
-  SM.SymbolMap AsteriusCodeGenError ->
   AsteriusModule
-buildGCModule verbose_err root_syms module_rep error_map = go (root_syms, SS.empty, mempty)
+buildGCModule verbose_err root_syms module_rep = go (root_syms, SS.empty, mempty)
   where
     go (i_staging_syms, i_acc_syms, i_m)
       | SS.null i_staging_syms = i_m
@@ -102,21 +93,21 @@ buildGCModule verbose_err root_syms module_rep error_map = go (root_syms, SS.emp
               extendStaticsMap
                 o_m_acc
                 ("__asterius_barf_" <> i_staging_sym)
-                (mkErrStatics i_staging_sym error_map)
+                (mkErrStatics i_staging_sym module_rep)
             )
           | otherwise =
             (i_child_syms_acc, o_m_acc)
 
 -- | Create a new data segment, containing the barf message as a plain,
 -- NUL-terminated bytestring.
-mkErrStatics :: EntitySymbol -> SM.SymbolMap AsteriusCodeGenError -> AsteriusStatics
-mkErrStatics sym error_map =
+mkErrStatics :: EntitySymbol -> AsteriusRepModule -> AsteriusStatics
+mkErrStatics sym module_rep =
   AsteriusStatics
     { staticsType = ConstBytes,
       asteriusStatics = [Serialized $ entityName sym <> err <> "\0"]
     }
   where
-    err = case SM.lookup sym error_map of
+    err = case findCodeGenError module_rep sym of
       Just e -> fromString (": " <> show e)
       _ -> mempty
 

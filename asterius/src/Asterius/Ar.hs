@@ -18,7 +18,7 @@ import qualified IfaceEnv as GHC
 -- the metadata of the contained files are ignored (@ahc-ar@ always sets them
 -- to default values anyway). If the metadata are really needed, make sure to
 -- update @ahc-ar@ to generate non-default values for them.
-loadAr :: GHC.NameCacheUpdater -> FilePath -> IO ModuleMetadata
+loadAr :: GHC.NameCacheUpdater -> FilePath -> IO AsteriusRepModule
 loadAr ncu p = do
   GHC.Archive entries <- GHC.loadAr p
   foldlM

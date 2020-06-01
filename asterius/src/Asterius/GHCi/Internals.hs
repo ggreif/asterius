@@ -193,7 +193,7 @@ asteriusIservCall hsc_env _ msg = do
     GHC.LoadDLL _ -> pure Nothing
     GHC.LoadArchive p -> modifyMVar_ globalGHCiState $ \s -> do
       lib <- loadAr (ghciNameCacheUpdater s) p
-      evaluate s {ghciLibs = mempty{repMetadata = lib} <> ghciLibs s}
+      evaluate s {ghciLibs = lib <> ghciLibs s}
     GHC.LoadObj p -> modifyMVar_ globalGHCiState $ \s -> do
       obj <- getFile (ghciNameCacheUpdater s) p
       evaluate s {ghciObjs = M.insert p obj $ ghciObjs s}
