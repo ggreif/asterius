@@ -161,6 +161,7 @@ data EntityLocation
   deriving (Show, Data)
 
 -- | Find an entity on disk given its location. Fail if it's not there.
+-- TODO: Shouldn't really be pure.
 findEntityOnDisk :: GHC.Binary a => EntitySymbol -> EntityLocation -> a
 findEntityOnDisk = error "TODO"
 
@@ -169,20 +170,19 @@ findEntityOnDisk = error "TODO"
 -- TODO: This should replace all uses of AsteriusCachedModule basically.
 data ModuleMetadata
   = ModuleMetadata
-      { staticsDependencyMap :: SymbolMap SymbolSet,
-        functionDependencyMap :: SymbolMap SymbolSet,
-        errorsDependencyMap :: SymbolMap SymbolSet,
-        staticsIndex :: SM.SymbolMap EntityLocation,
-        functionIndex :: SM.SymbolMap EntityLocation,
-        errorsIndex :: SM.SymbolMap EntityLocation,
-        -- TODO: for now we duplicate the whole FFIMarshalState but we will probably
-        -- prefer to have an index here, if that is possible.
-        metaFFIMarshalState :: FFIMarshalState
+      { staticsDependencyMap :: SymbolMap SymbolSet,  -- dependencies
+        functionDependencyMap :: SymbolMap SymbolSet, -- dependencies
+        errorsDependencyMap :: SymbolMap SymbolSet,   -- dependencies
+        staticsIndex :: SM.SymbolMap EntityLocation,  -- loc on disk
+        functionIndex :: SM.SymbolMap EntityLocation, -- loc on disk
+        errorsIndex :: SM.SymbolMap EntityLocation,   -- loc on disk
+        metaSptMap :: SymbolMap (Word64, Word64),     -- as is
+        metaFFIMarshalState :: FFIMarshalState        -- as is
       }
   deriving (Show, Data)
 
 instance Semigroup ModuleMetadata where
-  ModuleMetadata sdm0 fdm0 edm0 sidx0 fidx0 eidx0 mod_ffi_state0 <> ModuleMetadata sdm1 fdm1 edm1 sidx1 fidx1 eidx1 mod_ffi_state1 =
+  ModuleMetadata sdm0 fdm0 edm0 sidx0 fidx0 eidx0 spt0 ffi_state0 <> ModuleMetadata sdm1 fdm1 edm1 sidx1 fidx1 eidx1 spt1 ffi_state1 =
     ModuleMetadata
       (sdm0 <> sdm1)
       (fdm0 <> fdm1)
@@ -190,10 +190,11 @@ instance Semigroup ModuleMetadata where
       (sidx0 <> sidx1)
       (fidx0 <> fidx1)
       (eidx0 <> eidx1)
-      (mod_ffi_state0 <> mod_ffi_state1)
+      (spt0 <> spt1)
+      (ffi_state0 <> ffi_state1)
 
 instance Monoid ModuleMetadata where
-  mempty = ModuleMetadata mempty mempty mempty mempty mempty mempty mempty
+  mempty = ModuleMetadata mempty mempty mempty mempty mempty mempty mempty mempty
 
 createMetadata :: AsteriusModule -> ModuleMetadata
 createMetadata m =
@@ -204,7 +205,8 @@ createMetadata m =
       staticsIndex = mempty,
       functionIndex = mempty,
       errorsIndex = mempty,
-      metaFFIMarshalState = mempty -- ffiMarshalState m -- TODO: hate to duplicate this.
+      metaSptMap = mempty,
+      metaFFIMarshalState = mempty
     }
   where
     add :: Data a => SymbolMap a -> SymbolMap SymbolSet -> SymbolMap SymbolSet
@@ -256,8 +258,8 @@ fromAsteriusRepModule AsteriusRepModule{..} = from_disk <> inMemoryModule
         { staticsMap = SM.mapWithKey findEntityOnDisk (staticsIndex repMetadata),
           staticsErrorMap = SM.mapWithKey findEntityOnDisk (errorsIndex repMetadata),
           functionMap = SM.mapWithKey findEntityOnDisk (functionIndex repMetadata),
-          sptMap = mempty, -- TODO
-          ffiMarshalState = metaFFIMarshalState repMetadata -- :: FFIMarshalState -- TODO
+          sptMap = metaSptMap repMetadata,
+          ffiMarshalState = metaFFIMarshalState repMetadata
         }
 
 -- | Convert an 'AsteriusModule' to an 'AsteriusRepModule' by laboriously
