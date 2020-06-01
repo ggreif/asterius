@@ -11,7 +11,6 @@ module Asterius.Passes.GCSections
 where
 
 import Asterius.Types
-import qualified Asterius.Types.DependencyMap as DM
 import qualified Asterius.Types.SymbolMap as SM
 import qualified Asterius.Types.SymbolSet as SS
 import Data.String
@@ -97,10 +96,10 @@ buildGCModule verbose_err root_syms meta statics_map function_map error_map = go
         (i_child_syms, o_m) = SS.foldr' step (SS.empty, i_m) i_staging_syms
         o_staging_syms = i_child_syms `SS.difference` o_acc_syms
         step i_staging_sym (i_child_syms_acc, o_m_acc)
-          | Just es <- i_staging_sym `DM.lookup` staticsDependencyMap meta,
+          | Just es <- i_staging_sym `SM.lookup` staticsDependencyMap meta,
             ss <- statics_map SM.! i_staging_sym = -- should always succeed
             (es <> i_child_syms_acc, extendStaticsMap o_m_acc i_staging_sym ss)
-          | Just es <- i_staging_sym `DM.lookup` functionDependencyMap meta,
+          | Just es <- i_staging_sym `SM.lookup` functionDependencyMap meta,
             func <- function_map SM.! i_staging_sym = -- should always succeed
             (es <> i_child_syms_acc, extendFunctionMap o_m_acc i_staging_sym func)
           | verbose_err =

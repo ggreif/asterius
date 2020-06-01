@@ -55,7 +55,6 @@ where
 import Asterius.Binary.Orphans ()
 import Asterius.Binary.TH
 import Asterius.NFData.TH
-import qualified Asterius.Types.DependencyMap as DM
 import Asterius.Types.EntitySymbol
 import Asterius.Types.SymbolMap (SymbolMap)
 import qualified Asterius.Types.SymbolMap as SM
@@ -152,9 +151,9 @@ data EntityLocation
 -- TODO: This should replace all uses of AsteriusCachedModule basically.
 data ModuleMetadata
   = ModuleMetadata
-      { staticsDependencyMap :: DM.DependencyMap,
-        functionDependencyMap :: DM.DependencyMap,
-        errorsDependencyMap :: DM.DependencyMap,
+      { staticsDependencyMap :: SymbolMap SymbolSet,
+        functionDependencyMap :: SymbolMap SymbolSet,
+        errorsDependencyMap :: SymbolMap SymbolSet,
         entitySymbolIndex :: SM.SymbolMap EntityLocation,
         -- TODO: for now we duplicate the whole FFIMarshalState but we will probably
         -- prefer to have an index here, if that is possible.
@@ -208,9 +207,9 @@ toCachedModule m =
 createMetadata :: AsteriusModule -> ModuleMetadata
 createMetadata m =
   ModuleMetadata
-    { staticsDependencyMap = DM.toDependencyMap $ staticsMap m `add` SM.empty,
-      functionDependencyMap = DM.toDependencyMap $ functionMap m `add` SM.empty,
-      errorsDependencyMap = DM.toDependencyMap $ staticsErrorMap m `add` SM.empty,
+    { staticsDependencyMap = staticsMap m `add` SM.empty,
+      functionDependencyMap = functionMap m `add` SM.empty,
+      errorsDependencyMap = staticsErrorMap m `add` SM.empty,
       entitySymbolIndex = mempty, -- TODO empty, but we need extra field for in-memory entities.
       metaFFIMarshalState = ffiMarshalState m -- TODO: hate to duplicate this.
     }
