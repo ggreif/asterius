@@ -74,6 +74,7 @@ import qualified Data.ByteString as BS
 import Data.Data
 import qualified Data.Map.Lazy as LM
 import Foreign
+import GHC.IO (unsafeDupablePerformIO)
 import qualified Type.Reflection as TR
 
 type BinaryenIndex = Word32
@@ -173,20 +174,26 @@ data EntityLocation
   = -- | object file origin
     InObjectFile
       { srcObj :: FilePath,
-        srcOffset :: Integer
+        srcOffset :: Int
       }
     -- | archive file origin
   | InArchiveFile
       { srcAr :: FilePath,
         srcObj :: FilePath,
-        srcOffset :: Integer
+        srcOffset :: Int
       }
   deriving (Show, Data)
 
 -- | Find an entity on disk given its location. Fail if it's not there.
 -- TODO: Shouldn't really be pure.
-findEntityOnDisk :: GHC.Binary a => EntitySymbol -> EntityLocation -> a
-findEntityOnDisk = error "TODO"
+findEntityOnDisk :: GHC.Binary a => EntityLocation -> a
+findEntityOnDisk loc = unsafeDupablePerformIO $ case loc of
+  InObjectFile p off -> do
+    bh <- GHC.readBinMem p
+    GHC.seekBy bh off
+    GHC.get bh
+  InArchiveFile {} ->
+    error "TODO"
 
 ----------------------------------------------------------------------------
 
@@ -303,9 +310,9 @@ fromAsteriusRepModule AsteriusRepModule{..} = from_disk <> inMemoryModule
   where
     from_disk =
       AsteriusModule
-        { staticsMap = SM.mapWithKey findEntityOnDisk (staticsIndex repMetadata),
-          staticsErrorMap = SM.mapWithKey findEntityOnDisk (errorsIndex repMetadata),
-          functionMap = SM.mapWithKey findEntityOnDisk (functionIndex repMetadata),
+        { staticsMap = SM.mapWithKey (const findEntityOnDisk) $ staticsIndex repMetadata,
+          staticsErrorMap = SM.mapWithKey (const findEntityOnDisk) $ errorsIndex repMetadata,
+          functionMap = SM.mapWithKey (const findEntityOnDisk) $ functionIndex repMetadata,
           sptMap = metaSptMap repMetadata,
           ffiMarshalState = metaFFIMarshalState repMetadata
         }
@@ -334,7 +341,7 @@ findStatics AsteriusRepModule {..} sym
   | Just statics <- SM.lookup sym (staticsMap inMemoryModule) =
     statics
   | Just loc <- SM.lookup sym (staticsIndex repMetadata) =
-    findEntityOnDisk sym loc
+    findEntityOnDisk loc
   | otherwise =
     error "TODO: impossible"
 
@@ -345,7 +352,7 @@ findCodeGenError AsteriusRepModule {..} sym
   | Just err <- SM.lookup sym (staticsErrorMap inMemoryModule) =
     Just err
   | Just loc <- SM.lookup sym (errorsIndex repMetadata) =
-    Just $ findEntityOnDisk sym loc
+    Just $ findEntityOnDisk loc
   | otherwise =
     Nothing
 
@@ -356,7 +363,7 @@ findFunction AsteriusRepModule {..} sym
   | Just fun <- SM.lookup sym (functionMap inMemoryModule) =
     fun
   | Just loc <- SM.lookup sym (functionIndex repMetadata) =
-    findEntityOnDisk sym loc
+    findEntityOnDisk loc
   | otherwise =
     error "TODO: impossible"
 
