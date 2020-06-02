@@ -94,6 +94,16 @@ instance IsList (SymbolMap a) where
   fromList = fromListSM
   toList = toListSM
 
+instance Functor SymbolMap where
+  fmap f (SymbolMap m) = SymbolMap $ IM.map (\(k, e) -> (k, f e)) m
+
+instance Foldable SymbolMap where
+  foldr f z (SymbolMap m) = IM.foldr (\(_, e) b -> f e b) z m
+
+instance Traversable SymbolMap where
+  traverse f (SymbolMap m) =
+    SymbolMap <$> traverse (\(k, x) -> fmap (\e -> (k, e)) (f x)) m
+
 -- ----------------------------------------------------------------------------
 
 -- | /O(1)/. The empty map.
