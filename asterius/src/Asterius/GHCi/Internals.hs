@@ -290,7 +290,7 @@ asteriusWriteIServ hsc_env i a
                 linkOutput = "",
                 linkObjs = [],
                 linkLibs = [],
-                linkModule = fromAsteriusRepModule $ m <> M.foldr' (<>) (ghciLibs s) (ghciObjs s),
+                linkModule = m <> M.foldr' (<>) (ghciLibs s) (ghciObjs s),
                 hasMain = False,
                 debug = False,
                 gcSections = True,

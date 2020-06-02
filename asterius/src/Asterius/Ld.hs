@@ -29,7 +29,7 @@ data LinkTask
   = LinkTask
       { progName, linkOutput :: FilePath,
         linkObjs, linkLibs :: [FilePath],
-        linkModule :: AsteriusModule,
+        linkModule :: AsteriusRepModule,
         hasMain, debug, gcSections, verboseErr :: Bool,
         outputIR :: Maybe FilePath,
         rootSymbols, exportFunctions :: [EntitySymbol]
@@ -47,7 +47,7 @@ loadTheWorld LinkTask {..} = do
   ncu <- newNameCacheUpdater
   lib <- mconcat <$> for linkLibs (loadAr ncu)
   objs <- rights <$> for linkObjs (tryGetFile ncu)
-  return $ mconcat objs <> lib <> inMemoryToRepModule linkModule
+  evaluate $ linkModule <> mconcat objs <> lib
 
 -- | The *_info are generated from Cmm using the INFO_TABLE macro.
 -- For example, see StgMiscClosures.cmm / Exception.cmm
@@ -89,15 +89,13 @@ rtsPrivateSymbols =
     ]
 
 linkModules ::
-  LinkTask ->
-  AsteriusRepModule ->
-  (AsteriusModule, Module, LinkReport)
+  LinkTask -> AsteriusRepModule -> (AsteriusModule, Module, LinkReport)
 linkModules LinkTask {..} module_rep =
   linkStart
     debug
     gcSections
     verboseErr
-    (module_rep <> inMemoryToRepModule builtin_m)
+    (inMemoryToRepModule builtin_m <> module_rep)
     ( SS.unions
         [ SS.fromList rootSymbols,
           rtsUsedSymbols,

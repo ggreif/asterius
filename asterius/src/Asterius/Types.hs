@@ -222,15 +222,10 @@ instance Monoid ModuleMetadata where
 
 createMetadata :: AsteriusModule -> ModuleMetadata
 createMetadata m =
-  ModuleMetadata
+  mempty
     { staticsDependencyMap = createDependencyMap $ staticsMap m,
       functionDependencyMap = createDependencyMap $ functionMap m,
-      errorsDependencyMap = createDependencyMap $ staticsErrorMap m,
-      staticsIndex = mempty,
-      functionIndex = mempty,
-      errorsIndex = mempty,
-      metaSptMap = mempty,
-      metaFFIMarshalState = mempty
+      errorsDependencyMap = createDependencyMap $ staticsErrorMap m
     }
 
 createDependencyMap :: Data a => SymbolMap a -> SymbolMap SymbolSet

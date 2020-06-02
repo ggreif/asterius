@@ -1,4 +1,3 @@
-{-# LANGUAGE DuplicateRecordFields #-} -- TODO: eventually remove.
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE OverloadedStrings #-}
