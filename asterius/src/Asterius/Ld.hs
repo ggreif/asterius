@@ -89,7 +89,7 @@ rtsPrivateSymbols =
     ]
 
 linkModules ::
-  LinkTask -> AsteriusRepModule -> (AsteriusModule, Module, LinkReport)
+  LinkTask -> AsteriusRepModule -> IO (AsteriusModule, Module, LinkReport)
 linkModules LinkTask {..} module_rep =
   linkStart
     debug
@@ -119,7 +119,7 @@ linkModules LinkTask {..} module_rep =
 linkExeInMemory :: LinkTask -> IO (AsteriusModule, Module, LinkReport)
 linkExeInMemory ld_task = do
   module_rep <- loadTheWorld ld_task
-  evaluate $ linkModules ld_task module_rep
+  linkModules ld_task module_rep
 
 linkExe :: LinkTask -> IO ()
 linkExe ld_task@LinkTask {..} = do

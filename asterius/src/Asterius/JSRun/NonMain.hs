@@ -23,26 +23,26 @@ import Data.String
 import Language.JavaScript.Inline.Core
 import System.FilePath
 
-linkNonMain :: AsteriusRepModule -> [EntitySymbol] -> (Module, LinkReport)
-linkNonMain module_rep extra_syms = (m, link_report)
-  where
-    (_, m, link_report) =
-      linkModules
-        LinkTask
-          { progName = "",
-            linkOutput = "",
-            linkObjs = [],
-            linkLibs = [],
-            linkModule = mempty,
-            Asterius.Ld.hasMain = False,
-            Asterius.Ld.debug = False,
-            Asterius.Ld.gcSections = True,
-            Asterius.Ld.verboseErr = True,
-            Asterius.Ld.outputIR = Nothing,
-            rootSymbols = extra_syms,
-            Asterius.Ld.exportFunctions = []
-          }
-        module_rep
+linkNonMain :: AsteriusRepModule -> [EntitySymbol] -> IO (Module, LinkReport)
+linkNonMain module_rep extra_syms = do
+  (_, m, link_report) <-
+    linkModules
+      LinkTask
+        { progName = "",
+          linkOutput = "",
+          linkObjs = [],
+          linkLibs = [],
+          linkModule = mempty,
+          Asterius.Ld.hasMain = False,
+          Asterius.Ld.debug = False,
+          Asterius.Ld.gcSections = True,
+          Asterius.Ld.verboseErr = True,
+          Asterius.Ld.outputIR = Nothing,
+          rootSymbols = extra_syms,
+          Asterius.Ld.exportFunctions = []
+        }
+      module_rep
+  return (m, link_report)
 
 distNonMain ::
   FilePath -> [EntitySymbol] -> (Module, LinkReport) -> IO ()
@@ -70,7 +70,7 @@ newAsteriusInstanceNonMain ::
   AsteriusRepModule ->
   IO JSVal
 newAsteriusInstanceNonMain s p extra_syms module_rep = do
-  distNonMain p extra_syms $ linkNonMain module_rep extra_syms
+  linkNonMain module_rep extra_syms >>= distNonMain p extra_syms
   let rts_path = dataDir </> "rts" </> "rts.mjs"
       req_path = p -<.> "req.mjs"
       wasm_path = p -<.> "wasm"

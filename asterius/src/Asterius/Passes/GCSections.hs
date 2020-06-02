@@ -35,9 +35,9 @@ gcSections ::
   AsteriusRepModule ->
   SS.SymbolSet ->
   [EntitySymbol] ->
-  AsteriusModule
+  IO AsteriusModule
 gcSections verbose_err module_rep root_syms export_funcs =
-  final_m
+  return $ final_m
     { sptMap = spt_map,
       ffiMarshalState = ffi_this
     }
