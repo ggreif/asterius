@@ -95,7 +95,16 @@ linkModules LinkTask {..} module_rep =
     debug
     gcSections
     verboseErr
-    (inMemoryToRepModule builtin_m <> module_rep)
+    ( inMemoryToRepModule
+        ( (if hasMain then mainBuiltins else mempty)
+            <> rtsAsteriusModule
+              defaultBuiltinsOptions
+                { Asterius.Builtins.progName = progName,
+                  Asterius.Builtins.debug = debug
+                }
+        )
+        <> module_rep
+    )
     ( SS.unions
         [ SS.fromList rootSymbols,
           rtsUsedSymbols,
@@ -107,14 +116,6 @@ linkModules LinkTask {..} module_rep =
         ]
     )
     exportFunctions
-  where
-    builtin_m =
-      (if hasMain then mainBuiltins else mempty)
-        <> rtsAsteriusModule
-          defaultBuiltinsOptions
-            { Asterius.Builtins.progName = progName,
-              Asterius.Builtins.debug = debug
-            }
 
 linkExeInMemory :: LinkTask -> IO (AsteriusModule, Module, LinkReport)
 linkExeInMemory ld_task = do
