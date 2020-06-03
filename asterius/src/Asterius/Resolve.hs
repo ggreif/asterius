@@ -113,7 +113,7 @@ linkStart debug gc_sections verbose_err module_rep root_syms export_funcs = do
   (force -> !merged_m0) <-
     if gc_sections
       then gcSections verbose_err module_rep root_syms export_funcs
-      else return $ fromAsteriusRepModule module_rep
+      else fromAsteriusRepModule module_rep
   return $ linkStart' debug verbose_err merged_m0
 
 linkStart' ::

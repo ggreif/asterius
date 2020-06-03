@@ -36,6 +36,7 @@ module Asterius.Types.SymbolSet
 
     -- * Folds and Maps
     foldr',
+    foldrM,
 
     -- * Conversion
     toIntSet,
@@ -124,6 +125,12 @@ difference = coerce (IM.difference @EntitySymbol @EntitySymbol)
 {-# INLINE foldr' #-}
 foldr' :: forall b. (EntitySymbol -> b -> b) -> b -> SymbolSet -> b
 foldr' = coerce (IM.foldr' @EntitySymbol @b)
+
+-- | /O(n)/. Monadic fold over the elements of the set, associating to the
+-- right (i.e. from right to left).
+{-# INLINE foldrM #-}
+foldrM :: Monad m => (EntitySymbol -> b -> m b) -> b -> SymbolSet -> m b
+foldrM f z = Foldable.foldrM f z . toListSS
 
 -- ----------------------------------------------------------------------------
 

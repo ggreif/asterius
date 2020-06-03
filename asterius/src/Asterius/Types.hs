@@ -73,8 +73,8 @@ import Control.Exception
 import qualified Data.ByteString as BS
 import Data.Data
 import qualified Data.Map.Lazy as LM
+import Data.Traversable
 import Foreign
-import GHC.IO (unsafeDupablePerformIO)
 import qualified Type.Reflection as TR
 
 type BinaryenIndex = Word32
@@ -185,9 +185,8 @@ data EntityLocation
   deriving (Show, Data)
 
 -- | Find an entity on disk given its location. Fail if it's not there.
--- TODO: Shouldn't really be pure.
-findEntityOnDisk :: GHC.Binary a => EntityLocation -> a
-findEntityOnDisk loc = unsafeDupablePerformIO $ case loc of
+findEntityOnDisk :: GHC.Binary a => EntityLocation -> IO a
+findEntityOnDisk loc = case loc of
   InObjectFile p off -> do
     bh <- GHC.readBinMem p
     GHC.seekBy bh off
@@ -226,14 +225,6 @@ instance Semigroup ModuleMetadata where
 
 instance Monoid ModuleMetadata where
   mempty = ModuleMetadata mempty mempty mempty mempty mempty mempty mempty mempty
-
-createMetadata :: AsteriusModule -> ModuleMetadata
-createMetadata m =
-  mempty
-    { staticsDependencyMap = createDependencyMap $ staticsMap m,
-      functionDependencyMap = createDependencyMap $ functionMap m,
-      errorsDependencyMap = createDependencyMap $ staticsErrorMap m
-    }
 
 createDependencyMap :: Data a => SymbolMap a -> SymbolMap SymbolSet
 createDependencyMap sm = sm `add` SM.empty
@@ -293,7 +284,7 @@ instance GHC.Binary AsteriusRepModule where
 
   put_ _ _ = error "GHC.Binary.put_: AsteriusRepModule"
   -- TODO: Alternatively:
-  --   put_ bh m = GHC.put_ bh $ fromAsteriusRepModule m
+  --   put_ bh m = fromAsteriusRepModule m >>= GHC.put_ bh
 
 instance Semigroup AsteriusRepModule where
   AsteriusRepModule meta0 inmem0 <> AsteriusRepModule meta1 inmem1 =
@@ -305,26 +296,37 @@ instance Monoid AsteriusRepModule where
 -- | Convert an 'AsteriusRepModule' to a self-contained 'AsteriusModule' by
 -- loading everything remaining from disk and combining it with the parts of
 -- 'AsteriusModule' we have in memory (in 'inMemoryModule').
-fromAsteriusRepModule :: AsteriusRepModule -> AsteriusModule
-fromAsteriusRepModule AsteriusRepModule{..} = from_disk <> inMemoryModule
-  where
-    from_disk =
-      AsteriusModule
-        { staticsMap = SM.mapWithKey (const findEntityOnDisk) $ staticsIndex repMetadata,
-          staticsErrorMap = SM.mapWithKey (const findEntityOnDisk) $ errorsIndex repMetadata,
-          functionMap = SM.mapWithKey (const findEntityOnDisk) $ functionIndex repMetadata,
-          sptMap = metaSptMap repMetadata,
-          ffiMarshalState = metaFFIMarshalState repMetadata
-        }
+fromAsteriusRepModule :: AsteriusRepModule -> IO AsteriusModule
+fromAsteriusRepModule AsteriusRepModule{..} = do
+  statics_map <- for (staticsIndex repMetadata) findEntityOnDisk
+  errors_map <- for (errorsIndex repMetadata) findEntityOnDisk
+  function_map <- for (functionIndex repMetadata) findEntityOnDisk
+  let from_disk =
+        AsteriusModule
+          { staticsMap = statics_map,
+            staticsErrorMap = errors_map,
+            functionMap = function_map,
+            sptMap = metaSptMap repMetadata,
+            ffiMarshalState = metaFFIMarshalState repMetadata
+          }
+  evaluate $ from_disk <> inMemoryModule
 
 -- | Convert an 'AsteriusModule' to an 'AsteriusRepModule' by laboriously
 -- computing the dependency graph for each 'EntitySymbol'.
 inMemoryToRepModule :: AsteriusModule -> AsteriusRepModule
-inMemoryToRepModule m =
+inMemoryToRepModule store =
   AsteriusRepModule
-    { repMetadata = createMetadata m,
-      inMemoryModule = m
+    { repMetadata = createMetadata store,
+      inMemoryModule = store
     }
+  where
+    createMetadata :: AsteriusModule -> ModuleMetadata
+    createMetadata m =
+      mempty
+        { staticsDependencyMap = createDependencyMap $ staticsMap m,
+          functionDependencyMap = createDependencyMap $ functionMap m,
+          errorsDependencyMap = createDependencyMap $ staticsErrorMap m
+        }
 
 getCompleteSptMap :: AsteriusRepModule -> SymbolMap (Word64, Word64)
 getCompleteSptMap AsteriusRepModule{..} =
@@ -336,10 +338,10 @@ getCompleteFFIMarshalState AsteriusRepModule{..} =
 
 -- Look up first in memory. If the data is not there, try to retrieve it from
 -- dist, through the metadata. If it is not there either, then fail.
-findStatics :: AsteriusRepModule -> EntitySymbol -> AsteriusStatics
+findStatics :: AsteriusRepModule -> EntitySymbol -> IO AsteriusStatics
 findStatics AsteriusRepModule {..} sym
   | Just statics <- SM.lookup sym (staticsMap inMemoryModule) =
-    statics
+    pure statics
   | Just loc <- SM.lookup sym (staticsIndex repMetadata) =
     findEntityOnDisk loc
   | otherwise =
@@ -347,21 +349,21 @@ findStatics AsteriusRepModule {..} sym
 
 -- Look up first in memory. If the data is not there, try to retrieve it from
 -- dist, through the metadata. If it is not there either, then fail.
-findCodeGenError :: AsteriusRepModule -> EntitySymbol -> Maybe AsteriusCodeGenError
+findCodeGenError :: AsteriusRepModule -> EntitySymbol -> IO (Maybe AsteriusCodeGenError)
 findCodeGenError AsteriusRepModule {..} sym
   | Just err <- SM.lookup sym (staticsErrorMap inMemoryModule) =
-    Just err
+    pure $ Just err
   | Just loc <- SM.lookup sym (errorsIndex repMetadata) =
-    Just $ findEntityOnDisk loc
+    Just <$> findEntityOnDisk loc
   | otherwise =
-    Nothing
+    pure Nothing
 
 -- Look up first in memory. If the data is not there, try to retrieve it from
 -- dist, through the metadata. If it is not there either, then fail.
-findFunction :: AsteriusRepModule -> EntitySymbol -> Function
+findFunction :: AsteriusRepModule -> EntitySymbol -> IO Function
 findFunction AsteriusRepModule {..} sym
   | Just fun <- SM.lookup sym (functionMap inMemoryModule) =
-    fun
+    pure fun
   | Just loc <- SM.lookup sym (functionIndex repMetadata) =
     findEntityOnDisk loc
   | otherwise =
