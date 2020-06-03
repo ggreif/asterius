@@ -82,10 +82,10 @@ buildGCModule verbose_err root_syms module_rep = go (root_syms, SS.empty, mempty
         go (o_staging_syms, o_acc_syms, o_m)
       where
         step i_staging_sym (i_child_syms_acc, o_m_acc)
-          | Just es <- i_staging_sym `SM.lookup` staticsDependencyMap (repMetadata module_rep) = do
+          | Just es <- i_staging_sym `SM.lookup` staticsDependencyMap module_rep = do
             ss <- findStatics module_rep i_staging_sym
             pure (es <> i_child_syms_acc, extendStaticsMap o_m_acc i_staging_sym ss)
-          | Just es <- i_staging_sym `SM.lookup` functionDependencyMap (repMetadata module_rep) = do
+          | Just es <- i_staging_sym `SM.lookup` functionDependencyMap module_rep = do
             func <- findFunction module_rep i_staging_sym
             pure (es <> i_child_syms_acc, extendFunctionMap o_m_acc i_staging_sym func)
           | verbose_err = do
