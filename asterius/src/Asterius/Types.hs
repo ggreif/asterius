@@ -22,9 +22,8 @@ module Asterius.Types
     inMemoryToRepModule,
     getCompleteSptMap,
     getCompleteFFIMarshalState,
-    findStatics,
-    findCodeGenError,
-    findFunction,
+    MaybeEntity(..),
+    findEntity,
     EntitySymbol,
     entityName,
     mkEntitySymbol,
@@ -72,7 +71,7 @@ import Control.Exception
 import qualified Data.ByteString as BS
 import Data.Data
 import qualified Data.Map.Lazy as LM
-import Data.Traversable
+-- import Data.Traversable
 import Foreign
 import qualified Type.Reflection as TR
 
@@ -148,16 +147,47 @@ instance GHC.Binary AsteriusModule where
     ffiMarshalState <- GHC.get bh
     return AsteriusModule {..}
 
-  put_ bh AsteriusModule {..} = do
-    GHC.put_ bh $
-      createDependencyMap staticsMap
-        <> createDependencyMap functionMap
-        -- GEORGE: <> createDependencyMap staticsErrorMap
+  put_ bh m@AsteriusModule {..} = do
+    GHC.put_ bh $ mkModuleDependencyMap m
     GHC.put_ bh staticsMap
     GHC.put_ bh staticsErrorMap
     GHC.put_ bh functionMap
     GHC.put_ bh sptMap
     GHC.put_ bh ffiMarshalState
+
+----------------------------------------------------------------------------
+
+-- Layout on disk:
+-- * Index (locations and types) -- define enumeration type for all things we group.
+-- * DependencyMap
+-- * Actual data (including sptMap; it is empty, unless static pointers are used).
+--
+-- Leave the ffi state as is for now, but it should eventually get into the other maps.
+
+--      { staticsMap :: SymbolMap AsteriusStatics,
+--        staticsErrorMap :: SymbolMap AsteriusCodeGenError,
+--        functionMap :: SymbolMap Function,
+--        sptMap :: SymbolMap (Word64, Word64),
+--        ffiMarshalState :: FFIMarshalState
+
+data EntityType = StaticsType | CodeGenErrorType | FunType -- TODO: more for ffiMarshalState later..
+  deriving (Eq, Ord, Enum, Show, Data)
+
+mkModuleDependencyMap :: AsteriusModule -> SymbolMap SymbolSet
+mkModuleDependencyMap m =
+  createDependencyMap (staticsMap m)
+    <> createDependencyMap (functionMap m)
+    -- GEORGE: <> createDependencyMap (staticsErrorMap m)
+  where
+    createDependencyMap :: Data a => SymbolMap a -> SymbolMap SymbolSet
+    createDependencyMap = SM.foldrWithKey' (\k e -> SM.insert k (collectEntitySymbols e)) SM.empty
+
+    collectEntitySymbols :: Data a => a -> SymbolSet
+    collectEntitySymbols t
+      | Just TR.HRefl <- TR.eqTypeRep (TR.typeOf t) (TR.typeRep @EntitySymbol) =
+        SS.singleton t
+      | otherwise =
+        gmapQl (<>) SS.empty collectEntitySymbols t
 
 ----------------------------------------------------------------------------
 
@@ -194,19 +224,6 @@ findEntityOnDisk loc = case loc of
 
 ----------------------------------------------------------------------------
 
-createDependencyMap :: Data a => SymbolMap a -> SymbolMap SymbolSet
-createDependencyMap = SM.foldrWithKey' (\k e -> SM.insert k (collectEntitySymbols e)) SM.empty
-  where
-    -- Collect all entity symbols from an entity.
-    collectEntitySymbols :: Data a => a -> SymbolSet
-    collectEntitySymbols t
-      | Just TR.HRefl <- TR.eqTypeRep (TR.typeOf t) (TR.typeRep @EntitySymbol) =
-        SS.singleton t
-      | otherwise =
-        gmapQl (<>) SS.empty collectEntitySymbols t
-
-----------------------------------------------------------------------------
-
 -- | An 'AsteriusRepModule' is the representation of an 'AsteriusModule' before
 -- @gcSections@ has processed it. Note that this representation is supposed to
 -- capture ALL data, whether it comes from object files (in @repMetadata@),
@@ -219,12 +236,10 @@ createDependencyMap = SM.foldrWithKey' (\k e -> SM.insert k (collectEntitySymbol
 data AsteriusRepModule
   = AsteriusRepModule
       { -- | All metadata for the module, as obtained from object and archive files.
-        dependencyMap :: SymbolMap SymbolSet,
-        staticsIndex :: SM.SymbolMap EntityLocation,  -- meta: loc on disk
-        functionIndex :: SM.SymbolMap EntityLocation, -- meta: loc on disk
-        errorsIndex :: SM.SymbolMap EntityLocation,   -- meta: loc on disk
-        metaSptMap :: SymbolMap (Word64, Word64),     -- real: as is
-        metaFFIMarshalState :: FFIMarshalState,       -- real: as is
+        dependencyMap :: SymbolMap SymbolSet,                  -- meta: dependencies
+        moduleIndex :: SymbolMap (EntityType, EntityLocation), -- meta: loc on disk & type (for deserialization)
+        metaSptMap :: SymbolMap (Word64, Word64),              -- real: as is
+        metaFFIMarshalState :: FFIMarshalState,                -- real: as is
         -- | In-memory parts of the module that are not yet stored anywhere on disk yet.
         inMemoryModule :: AsteriusModule
       }
@@ -243,9 +258,7 @@ instance GHC.Binary AsteriusRepModule where
     -- combine them
     return AsteriusRepModule
       { dependencyMap = dmap,
-        staticsIndex = mempty,
-        functionIndex = mempty,
-        errorsIndex = mempty,
+        moduleIndex = mempty,
         metaSptMap = mempty,
         metaFFIMarshalState = mempty,
         inMemoryModule = AsteriusModule {..}
@@ -256,33 +269,33 @@ instance GHC.Binary AsteriusRepModule where
   --   put_ bh m = fromAsteriusRepModule m >>= GHC.put_ bh
 
 instance Semigroup AsteriusRepModule where
-  AsteriusRepModule dm0 sidx0 fidx0 eidx0 spt0 ffi_state0 inmem0 <> AsteriusRepModule dm1 sidx1 fidx1 eidx1 spt1 ffi_state1 inmem1 =
+  AsteriusRepModule dm0 idx0 spt0 ffi_state0 inmem0 <> AsteriusRepModule dm1 idx1 spt1 ffi_state1 inmem1 =
     AsteriusRepModule
       (dm0 <> dm1)
-      (sidx0 <> sidx1)
-      (fidx0 <> fidx1)
-      (eidx0 <> eidx1)
+      (idx0 <> idx1)
       (spt0 <> spt1)
       (ffi_state0 <> ffi_state1)
       (inmem0 <> inmem1)
 
 instance Monoid AsteriusRepModule where
-  mempty = AsteriusRepModule mempty mempty mempty mempty mempty mempty mempty
+  mempty = AsteriusRepModule mempty mempty mempty mempty mempty
+
+
+buildModuleFromIndex :: SymbolMap (EntityType, EntityLocation) -> IO AsteriusModule
+buildModuleFromIndex = error "TODO"
+  -- statics_map <- for staticsIndex findEntityOnDisk
+  -- errors_map <- for errorsIndex findEntityOnDisk
+  -- function_map <- for functionIndex findEntityOnDisk
 
 -- | Convert an 'AsteriusRepModule' to a self-contained 'AsteriusModule' by
 -- loading everything remaining from disk and combining it with the parts of
 -- 'AsteriusModule' we have in memory (in 'inMemoryModule').
 fromAsteriusRepModule :: AsteriusRepModule -> IO AsteriusModule
 fromAsteriusRepModule AsteriusRepModule{..} = do
-  statics_map <- for staticsIndex findEntityOnDisk
-  errors_map <- for errorsIndex findEntityOnDisk
-  function_map <- for functionIndex findEntityOnDisk
+  statics_errors_functions <- buildModuleFromIndex moduleIndex
   let from_disk =
-        AsteriusModule
-          { staticsMap = statics_map,
-            staticsErrorMap = errors_map,
-            functionMap = function_map,
-            sptMap = metaSptMap,
+        statics_errors_functions
+          { sptMap = metaSptMap,
             ffiMarshalState = metaFFIMarshalState
           }
   evaluate $ from_disk <> inMemoryModule
@@ -292,13 +305,8 @@ fromAsteriusRepModule AsteriusRepModule{..} = do
 inMemoryToRepModule :: AsteriusModule -> AsteriusRepModule
 inMemoryToRepModule m =
   AsteriusRepModule
-    { dependencyMap =
-        createDependencyMap (staticsMap m)
-          <> createDependencyMap (functionMap m),
-          -- GEORGE: <> createDependencyMap (staticsErrorMap m),
-      staticsIndex = mempty,
-      functionIndex = mempty,
-      errorsIndex = mempty,
+    { dependencyMap = mkModuleDependencyMap m,
+      moduleIndex = mempty,
       metaSptMap = mempty,
       metaFFIMarshalState = mempty,
       inMemoryModule = m
@@ -310,38 +318,29 @@ getCompleteSptMap AsteriusRepModule{..} = metaSptMap <> sptMap inMemoryModule
 getCompleteFFIMarshalState :: AsteriusRepModule -> FFIMarshalState
 getCompleteFFIMarshalState AsteriusRepModule{..} = metaFFIMarshalState <> ffiMarshalState inMemoryModule
 
--- Look up first in memory. If the data is not there, try to retrieve it from
--- dist, through the metadata. If it is not there either, then fail.
-findStatics :: AsteriusRepModule -> EntitySymbol -> IO (Maybe AsteriusStatics)
-findStatics AsteriusRepModule {..} sym
+data MaybeEntity
+  = JustStatics AsteriusStatics
+  | JustCodeGenError AsteriusCodeGenError
+  | JustFunction Function
+  | NoEntity
+  deriving (Show)
+
+findEntity :: AsteriusRepModule -> EntitySymbol -> IO MaybeEntity
+findEntity AsteriusRepModule {..} sym
+  -- Lookup into the in-memory module first, to avoid IO if possible
   | Just statics <- SM.lookup sym (staticsMap inMemoryModule) =
-    pure $ Just statics
-  | Just loc <- SM.lookup sym staticsIndex =
-    Just <$> findEntityOnDisk loc
-  | otherwise =
-    pure Nothing
-
--- Look up first in memory. If the data is not there, try to retrieve it from
--- dist, through the metadata. If it is not there either, then fail.
-findCodeGenError :: AsteriusRepModule -> EntitySymbol -> IO (Maybe AsteriusCodeGenError)
-findCodeGenError AsteriusRepModule {..} sym
+    pure $ JustStatics statics
   | Just err <- SM.lookup sym (staticsErrorMap inMemoryModule) =
-    pure $ Just err
-  | Just loc <- SM.lookup sym errorsIndex =
-    Just <$> findEntityOnDisk loc
-  | otherwise =
-    pure Nothing
-
--- Look up first in memory. If the data is not there, try to retrieve it from
--- dist, through the metadata. If it is not there either, then fail.
-findFunction :: AsteriusRepModule -> EntitySymbol -> IO (Maybe Function)
-findFunction AsteriusRepModule {..} sym
+    pure $ JustCodeGenError err
   | Just fun <- SM.lookup sym (functionMap inMemoryModule) =
-    pure $ Just fun
-  | Just loc <- SM.lookup sym functionIndex =
-    Just <$> findEntityOnDisk loc
-  | otherwise =
-    pure Nothing
+    pure $ JustFunction fun
+  -- Then look into the index, possibly retrieve from disk
+  | Just (ty, loc) <- SM.lookup sym moduleIndex = case ty of
+      StaticsType -> JustStatics <$> findEntityOnDisk loc
+      CodeGenErrorType -> JustCodeGenError <$> findEntityOnDisk loc
+      FunType -> JustFunction <$> findEntityOnDisk loc
+  -- Otherwise, TODO
+  | otherwise = pure NoEntity
 
 ----------------------------------------------------------------------------
 
@@ -801,6 +800,8 @@ $(genNFData ''AsteriusStatics)
 
 $(genNFData ''AsteriusModule)
 
+$(genNFData ''EntityType)
+
 $(genNFData ''EntityLocation)
 
 $(genNFData ''AsteriusRepModule)
@@ -866,6 +867,8 @@ $(genBinary ''AsteriusStatic)
 $(genBinary ''AsteriusStaticsType)
 
 $(genBinary ''AsteriusStatics)
+
+$(genBinary ''EntityType)
 
 $(genBinary ''EntityLocation)
 

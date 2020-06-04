@@ -98,11 +98,12 @@ buildGCModule mod_syms err_syms module_rep = do
   SS.foldrM addErrEntry m err_syms
   where
     addEntry sym m =
-      findStatics module_rep sym >>= \case
-        Just statics -> pure $ extendStaticsMap m sym statics
-        Nothing -> findFunction module_rep sym >>= \case
-          Just function -> pure $ extendFunctionMap m sym function
-          Nothing -> return m -- Else do nothing
+      findEntity module_rep sym >>= \case
+        JustStatics statics -> pure $ extendStaticsMap m sym statics
+        JustFunction function -> pure $ extendFunctionMap m sym function
+        JustCodeGenError {} -> return m -- Do nothing (couldn't happen with original implementation)
+        NoEntity -> return m -- Else, do nothing
+
     addErrEntry sym m = do
       statics <- mkErrStatics sym module_rep
       pure $ extendStaticsMap m ("__asterius_barf_" <> sym) statics
@@ -111,9 +112,9 @@ buildGCModule mod_syms err_syms module_rep = do
 -- NUL-terminated bytestring.
 mkErrStatics :: EntitySymbol -> AsteriusRepModule -> IO AsteriusStatics
 mkErrStatics sym module_rep = do
-  err <- findCodeGenError module_rep sym >>= \case
-    Just e -> pure $ fromString (": " <> show e)
-    Nothing -> pure mempty
+  err <- findEntity module_rep sym >>= \case
+    JustCodeGenError e -> pure $ fromString (": " <> show e)
+    _other -> pure mempty -- TODO: think about this one
   pure
     AsteriusStatics
       { staticsType = ConstBytes,
