@@ -48,7 +48,14 @@ gcSections verbose_err module_rep root_syms export_funcs = do
       all_root_syms =
         SS.fromList [ffiExportClosure | FFIExportDecl {..} <- SM.elems ffi_exports]
           <> root_syms
-  final_m <- buildGCModule verbose_err all_root_syms module_rep
+  -- Resolve all symbols that are reachable from the root symbols. This
+  -- includes two categories: symbols that refer to statics and functions, and
+  -- symbols that refer to statics for barf messages.
+  let (mod_syms, err_syms) = resolveSyms verbose_err all_root_syms module_rep
+  -- Create the GC'd module now that we know exactly what is accessible. This
+  -- operation needs to access on-disk information.
+  final_m <- buildGCModule mod_syms err_syms module_rep
+
   let spt_map =
         getCompleteSptMap module_rep `SM.restrictKeys` SM.keysSet (staticsMap final_m)
   -- NOTE: it seems that the static pointers map either (a) needs
@@ -66,36 +73,41 @@ gcSections verbose_err module_rep root_syms export_funcs = do
         ffiMarshalState = ffi_this
       }
 
-buildGCModule ::
-  Bool ->
-  SS.SymbolSet ->
-  AsteriusRepModule ->
-  IO AsteriusModule
-buildGCModule verbose_err root_syms module_rep = go (root_syms, SS.empty, mempty)
+resolveSyms :: Bool -> SS.SymbolSet -> AsteriusRepModule -> (SS.SymbolSet, SS.SymbolSet)
+resolveSyms verbose_err root_syms module_rep = new_go (root_syms, SS.empty, mempty, mempty)
   where
-    go (i_staging_syms, i_acc_syms, i_m)
-      | SS.null i_staging_syms = pure i_m
-      | otherwise = do
+    new_go (i_staging_syms, i_acc_syms, i_m, i_err_syms)
+      | SS.null i_staging_syms = (i_m, i_err_syms)
+      | otherwise =
         let o_acc_syms = i_staging_syms <> i_acc_syms
-        (i_child_syms, o_m) <- SS.foldrM step (SS.empty, i_m) i_staging_syms
-        let o_staging_syms = i_child_syms `SS.difference` o_acc_syms
-        go (o_staging_syms, o_acc_syms, o_m)
+            (i_child_syms, o_m, o_err_syms) = SS.foldr' new_step (SS.empty, i_m, i_err_syms) i_staging_syms
+            o_staging_syms = i_child_syms `SS.difference` o_acc_syms
+         in new_go (o_staging_syms, o_acc_syms, o_m, o_err_syms)
       where
-        step i_staging_sym (i_child_syms_acc, o_m_acc)
-          | Just es <- i_staging_sym `SM.lookup` staticsDependencyMap module_rep = do
-            ss <- findStatics module_rep i_staging_sym
-            pure (es <> i_child_syms_acc, extendStaticsMap o_m_acc i_staging_sym ss)
-          | Just es <- i_staging_sym `SM.lookup` functionDependencyMap module_rep = do
-            func <- findFunction module_rep i_staging_sym
-            pure (es <> i_child_syms_acc, extendFunctionMap o_m_acc i_staging_sym func)
-          | verbose_err = do
-            statics <- mkErrStatics i_staging_sym module_rep
-            pure
-              ( i_child_syms_acc,
-                extendStaticsMap o_m_acc ("__asterius_barf_" <> i_staging_sym) statics
-              )
+        new_step i_staging_sym (i_child_syms_acc, o_m_acc, err_syms)
+          | Just es <- i_staging_sym `SM.lookup` staticsDependencyMap module_rep =
+            (es <> i_child_syms_acc, o_m_acc <> SS.singleton i_staging_sym, err_syms)
+          | Just es <- i_staging_sym `SM.lookup` functionDependencyMap module_rep =
+            (es <> i_child_syms_acc, o_m_acc <> SS.singleton i_staging_sym, err_syms)
+          | verbose_err =
+            (i_child_syms_acc, o_m_acc, err_syms <> SS.singleton i_staging_sym)
           | otherwise =
-            pure (i_child_syms_acc, o_m_acc)
+            (i_child_syms_acc, o_m_acc, err_syms)
+
+buildGCModule :: SS.SymbolSet -> SS.SymbolSet -> AsteriusRepModule -> IO AsteriusModule
+buildGCModule mod_syms err_syms module_rep = do
+  m <- SS.foldrM addEntry mempty mod_syms
+  SS.foldrM addErrEntry m err_syms
+  where
+    addEntry sym m =
+      findStatics module_rep sym >>= \case
+        Just statics -> pure $ extendStaticsMap m sym statics
+        Nothing -> findFunction module_rep sym >>= \case
+          Just function -> pure $ extendFunctionMap m sym function
+          Nothing -> return m -- Else do nothing
+    addErrEntry sym m = do
+      statics <- mkErrStatics sym module_rep
+      pure $ extendStaticsMap m ("__asterius_barf_" <> sym) statics
 
 -- | Create a new data segment, containing the barf message as a plain,
 -- NUL-terminated bytestring.

@@ -320,14 +320,14 @@ getCompleteFFIMarshalState AsteriusRepModule{..} = metaFFIMarshalState <> ffiMar
 
 -- Look up first in memory. If the data is not there, try to retrieve it from
 -- dist, through the metadata. If it is not there either, then fail.
-findStatics :: AsteriusRepModule -> EntitySymbol -> IO AsteriusStatics
+findStatics :: AsteriusRepModule -> EntitySymbol -> IO (Maybe AsteriusStatics)
 findStatics AsteriusRepModule {..} sym
   | Just statics <- SM.lookup sym (staticsMap inMemoryModule) =
-    pure statics
+    pure $ Just statics
   | Just loc <- SM.lookup sym staticsIndex =
-    findEntityOnDisk loc
+    Just <$> findEntityOnDisk loc
   | otherwise =
-    error "TODO: impossible"
+    pure Nothing
 
 -- Look up first in memory. If the data is not there, try to retrieve it from
 -- dist, through the metadata. If it is not there either, then fail.
@@ -342,14 +342,14 @@ findCodeGenError AsteriusRepModule {..} sym
 
 -- Look up first in memory. If the data is not there, try to retrieve it from
 -- dist, through the metadata. If it is not there either, then fail.
-findFunction :: AsteriusRepModule -> EntitySymbol -> IO Function
+findFunction :: AsteriusRepModule -> EntitySymbol -> IO (Maybe Function)
 findFunction AsteriusRepModule {..} sym
   | Just fun <- SM.lookup sym (functionMap inMemoryModule) =
-    pure fun
+    pure $ Just fun
   | Just loc <- SM.lookup sym functionIndex =
-    findEntityOnDisk loc
+    Just <$> findEntityOnDisk loc
   | otherwise =
-    error "TODO: impossible"
+    pure Nothing
 
 ----------------------------------------------------------------------------
 
