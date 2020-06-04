@@ -139,10 +139,8 @@ instance Monoid AsteriusModule where
 
 instance GHC.Binary AsteriusModule where
   get bh = do
-    -- TODO: would be much nicer to ignore these completely..
-    _ :: SymbolMap SymbolSet <- GHC.get bh -- staticsDependencyMap
-    _ :: SymbolMap SymbolSet <- GHC.get bh -- functionDependencyMap
-    _ :: SymbolMap SymbolSet <- GHC.get bh -- errorsDependencyMap
+    -- TODO: would be much nicer to ignore this completely..
+    _ :: SymbolMap SymbolSet <- GHC.get bh -- dependencyMap
     staticsMap <- GHC.get bh
     staticsErrorMap <- GHC.get bh
     functionMap <- GHC.get bh
@@ -151,9 +149,10 @@ instance GHC.Binary AsteriusModule where
     return AsteriusModule {..}
 
   put_ bh AsteriusModule {..} = do
-    GHC.put_ bh $ createDependencyMap staticsMap
-    GHC.put_ bh $ createDependencyMap functionMap
-    GHC.put_ bh $ createDependencyMap staticsErrorMap
+    GHC.put_ bh $
+      createDependencyMap staticsMap
+        <> createDependencyMap functionMap
+        -- GEORGE: <> createDependencyMap staticsErrorMap
     GHC.put_ bh staticsMap
     GHC.put_ bh staticsErrorMap
     GHC.put_ bh functionMap
@@ -220,9 +219,7 @@ createDependencyMap = SM.foldrWithKey' (\k e -> SM.insert k (collectEntitySymbol
 data AsteriusRepModule
   = AsteriusRepModule
       { -- | All metadata for the module, as obtained from object and archive files.
-        staticsDependencyMap :: SymbolMap SymbolSet,  -- meta: dependencies
-        functionDependencyMap :: SymbolMap SymbolSet, -- meta: dependencies
-        errorsDependencyMap :: SymbolMap SymbolSet,   -- meta: dependencies
+        dependencyMap :: SymbolMap SymbolSet,
         staticsIndex :: SM.SymbolMap EntityLocation,  -- meta: loc on disk
         functionIndex :: SM.SymbolMap EntityLocation, -- meta: loc on disk
         errorsIndex :: SM.SymbolMap EntityLocation,   -- meta: loc on disk
@@ -236,9 +233,7 @@ data AsteriusRepModule
 instance GHC.Binary AsteriusRepModule where
   get bh = do
     -- Load metadata
-    sdm :: SymbolMap SymbolSet <- GHC.get bh -- staticsDependencyMap
-    fdm :: SymbolMap SymbolSet <- GHC.get bh -- functionDependencyMap
-    edm :: SymbolMap SymbolSet <- GHC.get bh -- errorsDependencyMap
+    dmap :: SymbolMap SymbolSet <- GHC.get bh -- dependencyMap
     -- Load actual file. TODO: this is temporary; that's what we want to avoid.
     staticsMap <- GHC.get bh
     staticsErrorMap <- GHC.get bh
@@ -247,9 +242,7 @@ instance GHC.Binary AsteriusRepModule where
     ffiMarshalState <- GHC.get bh
     -- combine them
     return AsteriusRepModule
-      { staticsDependencyMap = sdm,
-        functionDependencyMap = fdm,
-        errorsDependencyMap = edm,
+      { dependencyMap = dmap,
         staticsIndex = mempty,
         functionIndex = mempty,
         errorsIndex = mempty,
@@ -263,11 +256,9 @@ instance GHC.Binary AsteriusRepModule where
   --   put_ bh m = fromAsteriusRepModule m >>= GHC.put_ bh
 
 instance Semigroup AsteriusRepModule where
-  AsteriusRepModule sdm0 fdm0 edm0 sidx0 fidx0 eidx0 spt0 ffi_state0 inmem0 <> AsteriusRepModule sdm1 fdm1 edm1 sidx1 fidx1 eidx1 spt1 ffi_state1 inmem1 =
+  AsteriusRepModule dm0 sidx0 fidx0 eidx0 spt0 ffi_state0 inmem0 <> AsteriusRepModule dm1 sidx1 fidx1 eidx1 spt1 ffi_state1 inmem1 =
     AsteriusRepModule
-      (sdm0 <> sdm1)
-      (fdm0 <> fdm1)
-      (edm0 <> edm1)
+      (dm0 <> dm1)
       (sidx0 <> sidx1)
       (fidx0 <> fidx1)
       (eidx0 <> eidx1)
@@ -276,7 +267,7 @@ instance Semigroup AsteriusRepModule where
       (inmem0 <> inmem1)
 
 instance Monoid AsteriusRepModule where
-  mempty = AsteriusRepModule mempty mempty mempty mempty mempty mempty mempty mempty mempty
+  mempty = AsteriusRepModule mempty mempty mempty mempty mempty mempty mempty
 
 -- | Convert an 'AsteriusRepModule' to a self-contained 'AsteriusModule' by
 -- loading everything remaining from disk and combining it with the parts of
@@ -301,9 +292,10 @@ fromAsteriusRepModule AsteriusRepModule{..} = do
 inMemoryToRepModule :: AsteriusModule -> AsteriusRepModule
 inMemoryToRepModule m =
   AsteriusRepModule
-    { staticsDependencyMap = createDependencyMap $ staticsMap m,
-      functionDependencyMap = createDependencyMap $ functionMap m,
-      errorsDependencyMap = createDependencyMap $ staticsErrorMap m,
+    { dependencyMap =
+        createDependencyMap (staticsMap m)
+          <> createDependencyMap (functionMap m),
+          -- GEORGE: <> createDependencyMap (staticsErrorMap m),
       staticsIndex = mempty,
       functionIndex = mempty,
       errorsIndex = mempty,

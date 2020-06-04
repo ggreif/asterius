@@ -85,9 +85,7 @@ resolveSyms verbose_err root_syms module_rep = new_go (root_syms, SS.empty, memp
          in new_go (o_staging_syms, o_acc_syms, o_m, o_err_syms)
       where
         new_step i_staging_sym (i_child_syms_acc, o_m_acc, err_syms)
-          | Just es <- i_staging_sym `SM.lookup` staticsDependencyMap module_rep =
-            (es <> i_child_syms_acc, o_m_acc <> SS.singleton i_staging_sym, err_syms)
-          | Just es <- i_staging_sym `SM.lookup` functionDependencyMap module_rep =
+          | Just es <- i_staging_sym `SM.lookup` dependencyMap module_rep =
             (es <> i_child_syms_acc, o_m_acc <> SS.singleton i_staging_sym, err_syms)
           | verbose_err =
             (i_child_syms_acc, o_m_acc, err_syms <> SS.singleton i_staging_sym)
