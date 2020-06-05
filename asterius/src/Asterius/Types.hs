@@ -290,7 +290,7 @@ instance Monoid AsteriusRepModule where
   mempty = AsteriusRepModule mempty mempty mempty mempty mempty mempty
 
 buildModuleFromIndex :: SymbolMap (EntityType, EntityLocation) -> IO AsteriusModule
-buildModuleFromIndex = error "TODO"
+buildModuleFromIndex = pure mempty -- error "TODO"
   -- statics_map <- for staticsIndex findEntityOnDisk
   -- errors_map <- for errorsIndex findEntityOnDisk
   -- function_map <- for functionIndex findEntityOnDisk
