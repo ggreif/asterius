@@ -21,7 +21,8 @@ module Asterius.Types
     fromAsteriusRepModule,
     inMemoryToRepModule,
     getCompleteSptMap,
-    getCompleteFFIMarshalState,
+    getCompleteFFIImportDecls,
+    getCompleteFFIExportDecls,
     MaybeEntity(..),
     findEntity,
     EntitySymbol,
@@ -170,7 +171,12 @@ instance GHC.Binary AsteriusModule where
 --        sptMap :: SymbolMap (Word64, Word64),
 --        ffiMarshalState :: FFIMarshalState
 
-data EntityType = StaticsType | CodeGenErrorType | FunType -- TODO: more for ffiMarshalState later..
+data EntityType
+  = StaticsType
+  | CodeGenErrorType
+  | FunType
+  | FFIImportDeclType
+  | FFIExportDeclType
   deriving (Eq, Ord, Enum, Show, Data)
 
 mkModuleDependencyMap :: AsteriusModule -> SymbolMap SymbolSet
@@ -239,7 +245,8 @@ data AsteriusRepModule
         dependencyMap :: SymbolMap SymbolSet,                  -- meta: dependencies
         moduleIndex :: SymbolMap (EntityType, EntityLocation), -- meta: loc on disk & type (for deserialization)
         metaSptMap :: SymbolMap (Word64, Word64),              -- real: as is
-        metaFFIMarshalState :: FFIMarshalState,                -- real: as is
+        metaFFIImportDecls :: SymbolMap FFIImportDecl,         -- real: as is
+        metaFFIExportDecls :: SymbolMap FFIExportDecl,         -- real: as is
         -- | In-memory parts of the module that are not yet stored anywhere on disk yet.
         inMemoryModule :: AsteriusModule
       }
@@ -260,7 +267,8 @@ instance GHC.Binary AsteriusRepModule where
       { dependencyMap = dmap,
         moduleIndex = mempty,
         metaSptMap = mempty,
-        metaFFIMarshalState = mempty,
+        metaFFIImportDecls = mempty,
+        metaFFIExportDecls = mempty,
         inMemoryModule = AsteriusModule {..}
       }
 
@@ -269,17 +277,17 @@ instance GHC.Binary AsteriusRepModule where
   --   put_ bh m = fromAsteriusRepModule m >>= GHC.put_ bh
 
 instance Semigroup AsteriusRepModule where
-  AsteriusRepModule dm0 idx0 spt0 ffi_state0 inmem0 <> AsteriusRepModule dm1 idx1 spt1 ffi_state1 inmem1 =
+  AsteriusRepModule dm0 idx0 spt0 ffi_im0 ffi_ex0 inmem0 <> AsteriusRepModule dm1 idx1 spt1 ffi_im1 ffi_ex1 inmem1 =
     AsteriusRepModule
       (dm0 <> dm1)
       (idx0 <> idx1)
       (spt0 <> spt1)
-      (ffi_state0 <> ffi_state1)
+      (ffi_im0 <> ffi_im1)
+      (ffi_ex0 <> ffi_ex1)
       (inmem0 <> inmem1)
 
 instance Monoid AsteriusRepModule where
-  mempty = AsteriusRepModule mempty mempty mempty mempty mempty
-
+  mempty = AsteriusRepModule mempty mempty mempty mempty mempty mempty
 
 buildModuleFromIndex :: SymbolMap (EntityType, EntityLocation) -> IO AsteriusModule
 buildModuleFromIndex = error "TODO"
@@ -296,7 +304,11 @@ fromAsteriusRepModule AsteriusRepModule{..} = do
   let from_disk =
         statics_errors_functions
           { sptMap = metaSptMap,
-            ffiMarshalState = metaFFIMarshalState
+            ffiMarshalState =
+              FFIMarshalState
+                { ffiImportDecls = metaFFIImportDecls,
+                  ffiExportDecls = metaFFIExportDecls
+                }
           }
   evaluate $ from_disk <> inMemoryModule
 
@@ -308,20 +320,28 @@ inMemoryToRepModule m =
     { dependencyMap = mkModuleDependencyMap m,
       moduleIndex = mempty,
       metaSptMap = mempty,
-      metaFFIMarshalState = mempty,
+      metaFFIImportDecls = mempty,
+      metaFFIExportDecls = mempty,
       inMemoryModule = m
     }
 
 getCompleteSptMap :: AsteriusRepModule -> SymbolMap (Word64, Word64)
 getCompleteSptMap AsteriusRepModule{..} = metaSptMap <> sptMap inMemoryModule
 
-getCompleteFFIMarshalState :: AsteriusRepModule -> FFIMarshalState
-getCompleteFFIMarshalState AsteriusRepModule{..} = metaFFIMarshalState <> ffiMarshalState inMemoryModule
+getCompleteFFIImportDecls :: AsteriusRepModule -> SymbolMap FFIImportDecl
+getCompleteFFIImportDecls AsteriusRepModule{..} =
+  metaFFIImportDecls <> ffiImportDecls (ffiMarshalState inMemoryModule)
+
+getCompleteFFIExportDecls :: AsteriusRepModule -> SymbolMap FFIExportDecl
+getCompleteFFIExportDecls AsteriusRepModule{..} =
+  metaFFIExportDecls <> ffiExportDecls (ffiMarshalState inMemoryModule)
 
 data MaybeEntity
   = JustStatics AsteriusStatics
   | JustCodeGenError AsteriusCodeGenError
   | JustFunction Function
+  | JustFFIImportDecl FFIImportDecl
+  | JustFFIExportDecl FFIExportDecl
   | NoEntity
   deriving (Show)
 
@@ -334,12 +354,18 @@ findEntity AsteriusRepModule {..} sym
     pure $ JustCodeGenError err
   | Just fun <- SM.lookup sym (functionMap inMemoryModule) =
     pure $ JustFunction fun
+  | Just ffiimport <- SM.lookup sym (ffiImportDecls (ffiMarshalState inMemoryModule)) =
+    pure $ JustFFIImportDecl ffiimport
+  | Just ffiexport <- SM.lookup sym (ffiExportDecls (ffiMarshalState inMemoryModule)) =
+    pure $ JustFFIExportDecl ffiexport
   -- Then look into the index, possibly retrieve from disk
   | Just (ty, loc) <- SM.lookup sym moduleIndex = case ty of
       StaticsType -> JustStatics <$> findEntityOnDisk loc
       CodeGenErrorType -> JustCodeGenError <$> findEntityOnDisk loc
       FunType -> JustFunction <$> findEntityOnDisk loc
-  -- Otherwise, TODO
+      FFIImportDeclType -> JustFFIImportDecl <$> findEntityOnDisk loc
+      FFIExportDeclType -> JustFFIExportDecl <$> findEntityOnDisk loc
+  -- Otherwise, it doesn't exist.
   | otherwise = pure NoEntity
 
 ----------------------------------------------------------------------------

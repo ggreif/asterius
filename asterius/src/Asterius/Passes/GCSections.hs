@@ -40,9 +40,8 @@ gcSections ::
   IO AsteriusModule
 gcSections verbose_err module_rep root_syms export_funcs = do
   let -- inputs
-      ffi_all = getCompleteFFIMarshalState module_rep
       ffi_exports =
-        ffiExportDecls ffi_all `SM.restrictKeys` SS.fromList export_funcs
+        getCompleteFFIExportDecls module_rep `SM.restrictKeys` SS.fromList export_funcs
       -- Real root symbols include the given root symbols and the exported functions.
       all_root_syms :: SS.SymbolSet
       all_root_syms =
@@ -62,8 +61,8 @@ gcSections verbose_err module_rep root_syms export_funcs = do
   -- to be in the metadata (b) needs an index in the metadata. The
   -- metadata gets quite populated :/
   let ffi_this =
-        ffi_all
-          { ffiImportDecls = flip SM.filterWithKey (ffiImportDecls ffi_all) $ \k _ ->
+        FFIMarshalState
+          { ffiImportDecls = flip SM.filterWithKey (getCompleteFFIImportDecls module_rep) $ \k _ ->
               (k <> "_wrapper") `SM.member` functionMap final_m,
             ffiExportDecls = ffi_exports
           }
@@ -102,6 +101,8 @@ buildGCModule mod_syms err_syms module_rep = do
         JustStatics statics -> pure $ extendStaticsMap m sym statics
         JustFunction function -> pure $ extendFunctionMap m sym function
         JustCodeGenError {} -> return m -- Do nothing (couldn't happen with original implementation)
+        -- TODO: JustFFIImportDecl ffiimport
+        -- TODO: JustFFIExportDecl ffiexport
         NoEntity -> return m -- Else, do nothing
 
     addErrEntry sym m = do
