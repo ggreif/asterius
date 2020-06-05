@@ -32,6 +32,10 @@ import Data.String
 -- function symbols, we filter the JSFFI import declarations which actually
 -- correspond to those symbols.
 
+-- | Build an 'AsteriusModule' from an 'AsteriusRepModule', by keeping only the
+-- parts of the program that are reachable from the given root symbols and
+-- exported functions. Notice that this operation needs to be in 'IO', since
+-- most parts of the generated 'AsteriusModule' need to be read from disk.
 gcSections ::
   Bool ->
   AsteriusRepModule ->
@@ -39,39 +43,37 @@ gcSections ::
   [EntitySymbol] ->
   IO AsteriusModule
 gcSections verbose_err module_rep root_syms export_funcs = do
-  let -- inputs
-      ffi_exports =
-        getCompleteFFIExportDecls module_rep `SM.restrictKeys` SS.fromList export_funcs
-      -- Real root symbols include the given root symbols and the exported functions.
-      all_root_syms :: SS.SymbolSet
-      all_root_syms =
-        SS.fromList [ffiExportClosure | FFIExportDecl {..} <- SM.elems ffi_exports]
-          <> root_syms
-  -- Resolve all symbols that are reachable from the root symbols. This
-  -- includes two categories: symbols that refer to statics and functions, and
-  -- symbols that refer to statics for barf messages.
   let (mod_syms, err_syms) = resolveSyms verbose_err all_root_syms module_rep
-  -- Create the GC'd module now that we know exactly what is accessible. This
-  -- operation needs to access on-disk information.
   final_m <- buildGCModule mod_syms err_syms module_rep
 
   let spt_map =
         getCompleteSptMap module_rep `SM.restrictKeys` SM.keysSet (staticsMap final_m)
-  -- NOTE: it seems that the static pointers map either (a) needs
-  -- to be in the metadata (b) needs an index in the metadata. The
-  -- metadata gets quite populated :/
-  let ffi_this =
-        FFIMarshalState
-          { ffiImportDecls = flip SM.filterWithKey (getCompleteFFIImportDecls module_rep) $ \k _ ->
-              (k <> "_wrapper") `SM.member` functionMap final_m,
-            ffiExportDecls = ffi_exports
-          }
+
+  let ffi_imports =
+        flip SM.filterWithKey (getCompleteFFIImportDecls module_rep) $ \k _ ->
+          (k <> "_wrapper") `SM.member` functionMap final_m
+
   pure $
     final_m
       { sptMap = spt_map,
-        ffiMarshalState = ffi_this
+        ffiMarshalState =
+          FFIMarshalState
+            { ffiImportDecls = ffi_imports,
+              ffiExportDecls = ffi_exports
+            }
       }
+  where
+    ffi_exports =
+      getCompleteFFIExportDecls module_rep `SM.restrictKeys` SS.fromList export_funcs
+    -- Real root symbols include the given root symbols and the exported functions.
+    all_root_syms =
+      SS.fromList [ffiExportClosure | FFIExportDecl {..} <- SM.elems ffi_exports]
+        <> root_syms
 
+-- | Resolve all symbols that are reachable from the given root symnols. This
+-- includes 2 categories: symbols that refer to statics and functions, and
+-- symbols that refer to statics originating from barf messages (when
+-- @verbose_err@ is set to @True@).
 resolveSyms :: Bool -> SS.SymbolSet -> AsteriusRepModule -> (SS.SymbolSet, SS.SymbolSet)
 resolveSyms verbose_err root_syms module_rep = go (root_syms, SS.empty, mempty, mempty)
   where
