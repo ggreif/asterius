@@ -11,8 +11,11 @@ module Asterius.Passes.GCSections
 where
 
 import Asterius.Types
+import Asterius.Types.EntitySymbol
 import qualified Asterius.Types.SymbolMap as SM
 import qualified Asterius.Types.SymbolSet as SS
+import Data.Foldable
+import Data.Maybe
 import Data.String
 
 -- TODO: Add a couple of comments about why we create the final
@@ -44,24 +47,7 @@ gcSections ::
   IO AsteriusModule
 gcSections verbose_err module_rep root_syms export_funcs = do
   let (mod_syms, err_syms) = resolveSyms verbose_err all_root_syms module_rep
-  final_m <- buildGCModule mod_syms err_syms module_rep
-
-  let spt_map =
-        getCompleteSptMap module_rep `SM.restrictKeys` SM.keysSet (staticsMap final_m)
-
-  let ffi_imports =
-        flip SM.filterWithKey (getCompleteFFIImportDecls module_rep) $ \k _ ->
-          (k <> "_wrapper") `SM.member` functionMap final_m
-
-  pure $
-    final_m
-      { sptMap = spt_map,
-        ffiMarshalState =
-          FFIMarshalState
-            { ffiImportDecls = ffi_imports,
-              ffiExportDecls = ffi_exports
-            }
-      }
+  buildGCModule mod_syms err_syms module_rep ffi_exports
   where
     ffi_exports =
       getCompleteFFIExportDecls module_rep `SM.restrictKeys` SS.fromList export_funcs
@@ -93,23 +79,45 @@ resolveSyms verbose_err root_syms module_rep = go (root_syms, SS.empty, mempty, 
           | otherwise =
             (i_child_syms_acc, o_m_acc_syms, err_syms)
 
-buildGCModule :: SS.SymbolSet -> SS.SymbolSet -> AsteriusRepModule -> IO AsteriusModule
-buildGCModule mod_syms err_syms module_rep = do
-  m <- SS.foldrM addEntry mempty mod_syms
-  SS.foldrM addErrEntry m err_syms
+buildGCModule :: SS.SymbolSet -> SS.SymbolSet -> AsteriusRepModule -> SM.SymbolMap FFIExportDecl -> IO AsteriusModule
+buildGCModule mod_syms err_syms module_rep ffi_exports = do
+  -- 1. Build the statics and function maps
+  statics_fns_m <- SS.foldrM addEntry mempty mod_syms
+  -- 2. Add statics for barf-messages
+  statics_fns_errs_m <- SS.foldrM addErrEntry statics_fns_m err_syms
+  -- 3. Create the FFI imports
+  let wrapper_fn_syms :: [EntitySymbol]
+      wrapper_fn_syms = catMaybes . map stripWrapperSuffix . SS.toList . SM.keysSet $ functionMap statics_fns_m
+  ffi_imports <- foldrM addFFIImportEntry mempty wrapper_fn_syms
+  -- 4. Create the static pointers map
+  let spt_map =
+        getCompleteSptMap module_rep `SM.restrictKeys` SM.keysSet (staticsMap statics_fns_m)
+  -- Combine it all
+  pure $
+    statics_fns_errs_m
+      { sptMap = spt_map,
+        ffiMarshalState =
+          FFIMarshalState
+            { ffiImportDecls = ffi_imports,
+              ffiExportDecls = ffi_exports
+            }
+      }
   where
-    addEntry sym m =
-      findEntity module_rep sym >>= \case
-        JustStatics statics -> pure $ extendStaticsMap m sym statics
-        JustFunction function -> pure $ extendFunctionMap m sym function
-        JustCodeGenError {} -> return m -- Do nothing (couldn't happen with original implementation)
-        -- TODO: JustFFIImportDecl ffiimport
-        -- TODO: JustFFIExportDecl ffiexport
-        NoEntity -> return m -- Else, do nothing
+    addEntry sym m = findEntity module_rep sym >>= \case
+      JustStatics statics -> pure $ extendStaticsMap m sym statics
+      JustFunction function -> pure $ extendFunctionMap m sym function
+      JustCodeGenError {} -> pure m -- Do nothing (couldn't happen with original implementation)
+      JustFFIImportDecl {} -> pure m -- TODO: Do nothing (couldn't happen with original implementation)
+      JustFFIExportDecl {} -> pure m -- TODO: Do nothing (couldn't happen with original implementation)
+      NoEntity -> pure m -- Else, do nothing
 
     addErrEntry sym m = do
       statics <- mkErrStatics sym module_rep
       pure $ extendStaticsMap m ("__asterius_barf_" <> sym) statics
+
+    addFFIImportEntry sym sm = findEntity module_rep sym >>= \case
+      JustFFIImportDecl ffiimport -> pure $ SM.insert sym ffiimport sm
+      _other -> pure sm -- TODO: think about this one
 
 -- | Create a new data segment, containing the barf message as a plain,
 -- NUL-terminated bytestring.
