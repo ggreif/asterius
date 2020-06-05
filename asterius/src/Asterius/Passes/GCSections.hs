@@ -73,23 +73,23 @@ gcSections verbose_err module_rep root_syms export_funcs = do
       }
 
 resolveSyms :: Bool -> SS.SymbolSet -> AsteriusRepModule -> (SS.SymbolSet, SS.SymbolSet)
-resolveSyms verbose_err root_syms module_rep = new_go (root_syms, SS.empty, mempty, mempty)
+resolveSyms verbose_err root_syms module_rep = go (root_syms, SS.empty, mempty, mempty)
   where
-    new_go (i_staging_syms, i_acc_syms, i_m, i_err_syms)
-      | SS.null i_staging_syms = (i_m, i_err_syms)
+    go (i_staging_syms, i_acc_syms, i_m_syms, i_err_syms)
+      | SS.null i_staging_syms = (i_m_syms, i_err_syms)
       | otherwise =
         let o_acc_syms = i_staging_syms <> i_acc_syms
-            (i_child_syms, o_m, o_err_syms) = SS.foldr' new_step (SS.empty, i_m, i_err_syms) i_staging_syms
+            (i_child_syms, o_m_syms, o_err_syms) = SS.foldr' step (SS.empty, i_m_syms, i_err_syms) i_staging_syms
             o_staging_syms = i_child_syms `SS.difference` o_acc_syms
-         in new_go (o_staging_syms, o_acc_syms, o_m, o_err_syms)
+         in go (o_staging_syms, o_acc_syms, o_m_syms, o_err_syms)
       where
-        new_step i_staging_sym (i_child_syms_acc, o_m_acc, err_syms)
+        step i_staging_sym (i_child_syms_acc, o_m_acc_syms, err_syms)
           | Just es <- i_staging_sym `SM.lookup` dependencyMap module_rep =
-            (es <> i_child_syms_acc, o_m_acc <> SS.singleton i_staging_sym, err_syms)
+            (es <> i_child_syms_acc, o_m_acc_syms <> SS.singleton i_staging_sym, err_syms)
           | verbose_err =
-            (i_child_syms_acc, o_m_acc, err_syms <> SS.singleton i_staging_sym)
+            (i_child_syms_acc, o_m_acc_syms, err_syms <> SS.singleton i_staging_sym)
           | otherwise =
-            (i_child_syms_acc, o_m_acc, err_syms)
+            (i_child_syms_acc, o_m_acc_syms, err_syms)
 
 buildGCModule :: SS.SymbolSet -> SS.SymbolSet -> AsteriusRepModule -> IO AsteriusModule
 buildGCModule mod_syms err_syms module_rep = do
