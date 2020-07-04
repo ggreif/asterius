@@ -10,7 +10,15 @@ packages:
   - wasm-toolkit
 
 
-ghc-variant: asterius
+system-ghc: false
+
+compiler: ghc-8.8.3
+
+extra-lib-dirs:
+- /nix/store/8mhxy2gmi2hgh2p31j343mwrssyng0fb-binaryen-93/lib
+- /nix/store/1jl5kvjxhg1dxj9k1c0h4mpviqqcn3bi-ncurses-6.2/lib
+
+# ghc-variant: asterius
 
 setup-info:
   ghc:
